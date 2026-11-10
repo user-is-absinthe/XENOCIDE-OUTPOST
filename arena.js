@@ -51,6 +51,13 @@ window.Arena = (() => {
         }
         break;
       case 'loot': floaters.push({ text: '+₡ ' + e.amount, color: '#e6c46a', side: 'crew', unit: null, born: t, until: t + 1 }); break;
+      case 'gear': floaters.push({ text: '◈ ' + e.name, color: '#b6e36a', side: 'foe', unit: null, born: t, until: t + 1.1 }); break;
+      case 'save':
+        if (e.target) {
+          flashes.push({ kind: 'green', side: 'crew', unit: e.target, born: t, until: t + 0.5 });
+          floaters.push({ text: 'МАЯК', color: '#8fd3ff', side: 'crew', unit: e.target, born: t, until: t + 1.1 });
+        }
+        break;
       case 'spawn': if (Array.isArray(e.foes)) e.foes.forEach(f => spawns.set(f, t)); break;
       case 'sectorClear': flashes.push({ kind: 'screen', born: t, until: t + 0.3 }); break;
       case 'grenade': flashes.push({ kind: 'foeAll', born: t, until: t + 0.4 }); break;

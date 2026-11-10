@@ -3,7 +3,7 @@
    чтобы вернуться к тюнингу позже по запросу. Чистый модуль, без DOM. */
 window.Balance = (() => {
   const b = {
-    version: '0.4.1',
+    version: '0.5.0',
     profileVersion: 3,
     buildings: { cost: 85 },
     hiring: {
@@ -32,13 +32,17 @@ window.Balance = (() => {
       enemyDepthScale: 0.09,
       enemyAttackFlat: 4,            // урон врага: 4 + тип
       bossAttack: 11,
-      medicEvery: 3, medicThreshold: 0.75
+      medicEvery: 3, medicThreshold: 0.75,
+      /* Пакет 0.5.0: решения в бою */
+      grenadeDamage: 15,   // урок всем живым врагам (у осколочной гранаты своё значение)
+      retreatCargo: 0.5,   // доля груза, уходящая на базу при отступлении
+      coverMinAlive: 2     // прикрытие отхода доступно при 2+ живых
     },
     rewards: {
       bossFlat: 45, killFlat: 8, killPerDepth: 2,
       extractFlat: 12, extractDivisor: 2 // бонус эвакуации: 12 + floor(глубина / 2)
     },
-    loot: { cacheFlat: 12, cachePerDepth: 3, medicalChance: 0.15 },
+    loot: { cacheFlat: 12, cachePerDepth: 3, medicalChance: 0.15, cacheItemChance: 0.25 },
     routes: {
       normal: { name: 'Основной коридор', hp: 1, attack: 1, reward: 1, elite: 0.12 },
       safe: { name: 'Сервисный обход', hp: 0.85, attack: 0.85, reward: 0.85, elite: 0.06 },
@@ -50,10 +54,43 @@ window.Balance = (() => {
       fxSpan: 700 // визуальное окно событий арены (мс visualTime)
     },
     stats: { firstBucketEnd: 4, bucketSize: 5 },
-    menu: { demoLoop: 12 } // секунд цикла демо-сцены в меню
-    /* Задел пакетов 0.5.0+ (черновые числа, баланс позже):
-       xp: { thresholds: [0, 100, 250, 500, 900], perDepth: 10, perBoss: 25, maxLevel: 5 },
-       perks: {...}, gear: {...}, contracts: {...}, events: {...}, modifiers: {...} */
+    menu: { demoLoop: 12 }, // секунд цикла демо-сцены в меню
+    /* --- Пакет 0.5.0 «Бойцы и снаряжение» --- */
+    xp: {
+      thresholds: [0, 100, 250, 500, 900], // пороги уровней 1..5
+      perDepth: 10, perBoss: 25,           // награда: 10×глубина + 25×пройденных боссов
+      hpPerLevel: 3, atkPerLevel: 1        // +3 maxHp и +1 урон за уровень
+    },
+    perks: {
+      max: 2, atLevels: [2, 4], // выбор перка на уровнях 2 и 4
+      list: {
+        tough: { name: 'Крепкий', text: '+15 к вместимости здоровья', hp: 15 },
+        marksman: { name: 'Меткий', text: '+2 к урону', atk: 2 },
+        medic: { name: 'Полевой медик', text: '+8 к лечению отряда', heal: 8 },
+        armored: { name: 'Бронированный', text: '+2 к броне', armor: 2 },
+        seeker: { name: 'Искатель', text: '+5% к шансу находок', find: 0.05 },
+        veteran: { name: 'Ветеран', text: '+1 урона за каждые 5 секторов рейда', veteran: 1 }
+      }
+    },
+    /* Определения предметов. Числа черновые, баланс не пересматривается. */
+    gear: {
+      wearPerRaid: 1, repairPerPoint: 5,
+      defs: {
+        pulse_rifle: { name: 'Импульсная винтовка', type: 'weapon', atk: 3, durability: 10 },
+        carbine_mk2: { name: 'Карабин МК-2', type: 'weapon', atk: 2, durability: 12 },
+        plasma_cutter: { name: 'Экспериментальный плазморез', type: 'weapon', atk: 5, armor: -1, durability: 8 },
+        armor_plate: { name: 'Бронепластина', type: 'armor', armor: 2, durability: 10 },
+        field_medkit: { name: 'Полевой медкомплект', type: 'gadget', kit: 5, durability: 10 },
+        frag_grenade: { name: 'Осколочная граната', type: 'gadget', grenade: 15, durability: 1 },
+        power_cell: { name: 'Энергетический аккумулятор', type: 'gadget', atk: 4, classReq: 'engineer', durability: 10 },
+        osa_turret: { name: 'Автотурель «Оса»', type: 'gadget', atk: 3, durability: 10 },
+        bio_scanner: { name: 'Сканер биомассы', type: 'gadget', find: 0.05, durability: 10 },
+        incendiary: { name: 'Зажигательный заряд', type: 'gadget', boss: 2, durability: 6 },
+        scope_stabilizer: { name: 'Стабилизатор прицела', type: 'gadget', pierce: 1, durability: 10 },
+        safety_beacon: { name: 'Страховой маяк', type: 'gadget', beacon: 1, durability: 1 }
+      }
+    }
+    /* Задел пакетов 0.6.0+: contracts: {...}, events: {...}, modifiers: {...} */
   };
   return b;
 })();

@@ -64,6 +64,7 @@
     const r = S.raid;
     const ok = set('#raid-hud', Screens.hudHtml(S, ui)) &&
       set('#route-track', Screens.routeTrackHtml(r)) &&
+      set('#raid-actions', Screens.raidActionsHtml(S, ui)) &&
       set('#sector-status', Screens.statusHtml(S, ui)) &&
       set('#raid-event-wrap', Screens.eventHtml(S)) &&
       set('#raid-log', Screens.logHtml(S)) &&
@@ -122,12 +123,7 @@
     // defeat сразу уводит экран в итоги — там очередь всё равно сбрасывается.
     if (res.events.length) Arena.emit(res.events, Balance.raid.fxSpan, res.status === 'defeat');
     if (res.status === 'defeat') { Battle.finish(S, false); showResult(false); return; }
-    if (res.status === 'cleared') {
-      const r = S.raid;
-      if (r.depth % Balance.raid.checkpointEvery === 0) { overlay = 'room'; Automation.ensure(r); save(); render(); }
-      else { save(); refreshRaid(); }
-      return;
-    }
+    if (res.status === 'cleared') { onCleared(); return; }
     save(); refreshRaid();
   }
 
@@ -177,6 +173,38 @@
   function heal(index) {
     const res = State.healRecruit(S, index, S.buildings.medbay);
     if (res.ok) { save(); render(); }
+  }
+
+  function equip(index, slot, itemId) {
+    if (S.raid) { render(); return; }
+    if (State.equip(S, index, slot, itemId)) { save(); render(); }
+  }
+
+  function repair(itemId) {
+    if (S.raid) return;
+    const res = State.repairItem(S, itemId);
+    if (res.ok) { save(); render(); }
+  }
+
+  function pickPerk(index, key) {
+    const member = S.recruits[Number(index)];
+    if (member && State.applyPerk(member, key)) { save(); render(); }
+  }
+
+  /* Шлюз зачищен: на пятом секторе показываем экран эвакуации, иначе — переход. */
+  function onCleared() {
+    const r = S.raid;
+    if (!r) return;
+    if (r.depth % Balance.raid.checkpointEvery === 0) { overlay = 'room'; Automation.ensure(r); save(); render(); }
+    else { save(); refreshRaid(); }
+  }
+
+  function useGrenade() {
+    const res = Battle.grenade(S);
+    if (!res.ok) return;
+    if (res.events.length) Arena.emit(res.events, Balance.raid.fxSpan, false);
+    if (res.status === 'cleared') onCleared();
+    else { save(); refreshRaid(); }
   }
 
   function setPrep(key, value) {
@@ -280,6 +308,15 @@
       case 'start': start(); break;
       case 'resume': resumeRaid(); break;
       case 'heal': heal(Number(btn && btn.dataset.index)); break;
+      case 'repair': repair(btn && btn.dataset.item); break;
+      case 'perk': pickPerk(btn && btn.dataset.index, btn && btn.dataset.perk); break;
+      case 'grenade': useGrenade(); break;
+      case 'retreat':
+        openDialog({ kind: 'confirm', eyebrow: 'ЭКСПЕДИЦИЯ', title: 'Отступить?', body: 'Отряд немедленно завершит рейд. Выжившие вернутся с ранениями, на базу уйдёт лишь половина собранного груза, аптечки не возвращаются. Глубина рейда засчитается.', confirm: 'Отступить', danger: true, command: 'retreat' });
+        break;
+      case 'cover':
+        openDialog({ kind: 'confirm', eyebrow: 'ПРИКРЫТИЕ ОТХОДА', title: 'Оставить бойца прикрывать отход?', body: 'Самый раненый боец погибнет. Остальные немедленно завершат рейд с полным грузом. Доступно один раз за рейд.', confirm: 'Прикрыть отход', danger: true, command: 'cover' });
+        break;
       case 'route-safe': chooseRoute('safe'); break;
       case 'route-risk': chooseRoute('risk'); break;
       case 'extract': if (Battle.extract(S, uiState())) showResult(true); break;
@@ -308,6 +345,8 @@
         dialog = null;
         if (command === 'new') runNewGame();
         else if (command === 'newrun') runAbort();
+        else if (command === 'retreat') { Battle.retreat(S); showResult(false); }
+        else if (command === 'cover') { Battle.cover(S); showResult(true); }
         else render();
         break;
       }
@@ -337,9 +376,9 @@
   }
 
   window.Game = {
-    action, setTab, pick, autoSquad, heal, setPrep, importFile, render,
+    action, setTab, pick, autoSquad, heal, equip, repair, pickPerk, setPrep, importFile, render,
     profile: () => S, uiState, purchaseUpgrade, buyUpgrades, start, resumeRaid, save,
-    tick, stepCheckpoint, chooseRoute, showResult, hire, restartTimer
+    tick, stepCheckpoint, chooseRoute, showResult, hire, restartTimer, useGrenade
   };
 
   if (initial) { State.recruit(S, false); State.recruit(S, false); save(); }

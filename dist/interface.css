@@ -148,3 +148,24 @@ button:disabled{opacity:.53}
 .dialog-overlay .dialog .actions{gap:10px}
 .danger.primary{background:#4a2a28;color:#ffd2c9;border-color:#a0655e}
 .danger.primary:hover:not(:disabled){background:#633733}
+
+/* --- 0.5.0: бойцы и снаряжение --- */
+.crew-card-meta{display:flex;flex-direction:column;gap:10px;padding:10px 14px;border-top:1px solid #2c4547;background:#0e1b21}
+.xp-line{display:flex;align-items:center;gap:8px;font-size:11px}
+.xp-rank{color:#9fd9c6;white-space:nowrap}
+.xp-track{flex:1;height:6px;background:#0a151a;border-radius:3px;overflow:hidden;min-width:50px}
+.xp-track>span{display:block;height:100%;background:#e0b06b}
+.xp-value{color:#81999e;font:10px monospace;white-space:nowrap}
+.gear-block{display:flex;flex-direction:column;gap:6px}
+.gear-title{font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:#7f9a97}
+.gear-slot{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.gear-slot-name{font-size:11px;color:#93aaa6;width:56px;flex-shrink:0}
+.gear-slot select{flex:1;min-width:120px;font-size:11px;padding:4px 6px}
+.gear-repair{font-size:10px;padding:3px 8px;min-height:24px}
+.perk-picker{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid #6a5aa0;border-radius:5px;background:#1a1730}
+.perk-title{font-size:11px;color:#c9b8f5}
+.perk-options{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.perk-option{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;font-size:11px;padding:6px 8px;min-height:36px}
+.perk-option span{font-size:10px;color:#a9b6c4}
+.raid-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.result-changes .xp-gain{font-style:normal;color:#e0b06b;font-size:11px;margin-left:6px}

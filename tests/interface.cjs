@@ -16,7 +16,7 @@ function make2d() {
 }
 const canvasStub = () => ({ width: 840, height: 240, getContext: () => make2d() });
 const nodes = Object.fromEntries(['#app', '#resources', '#notice', 'nav'].map(k => [k, { innerHTML: '', textContent: '', hidden: false }]));
-const regions = Object.fromEntries(['#raid-hud', '#route-track', '#sector-status', '#raid-event-wrap', '#raid-log', '#raid-crew', '#raid-foes', '#raid-kits', '#raid-loot', '#resources strong', '#building-barracks .tag'].map(k => [k, { innerHTML: '', textContent: '' }]));
+const regions = Object.fromEntries(['#raid-hud', '#route-track', '#raid-actions', '#sector-status', '#raid-event-wrap', '#raid-log', '#raid-crew', '#raid-foes', '#raid-kits', '#raid-loot', '#resources strong', '#building-barracks .tag'].map(k => [k, { innerHTML: '', textContent: '' }]));
 const charts = Object.fromEntries(['#chart-deaths', '#chart-loot', '#chart-outcomes', '#arena'].map(k => [k, canvasStub()]));
 const node = q => nodes[q] || regions[q] || charts[q] || null;
 nodes['#app'].querySelector = q => node(q);
@@ -74,7 +74,7 @@ assert(menuHtml.includes('data-action="stats"'), 'кнопка «Статист�
 assert(menuHtml.includes('id="menu-demo"'), 'живая сцена в меню');
 assert(menuHtml.includes('menu-dim'), 'затемнение поверх сцены');
 assert(menuHtml.includes('pointer-events:none') === false, 'стили — в CSS, не инлайном');
-assert(menuHtml.includes('ВЕРСИЯ 0.4.1'), 'версия пакета в меню');
+assert(menuHtml.includes('ВЕРСИЯ 0.5.0'), 'версия пакета в меню');
 
 /* --- База, отряд, настройки, рейд --- */
 for (const tab of ['base', 'squad', 'save', 'raid']) {
@@ -108,6 +108,30 @@ html = nodes['#app'].innerHTML;
 assert(html.includes('Здоров'), 'при полном здоровье — «Здоров»');
 assert(/data-action="heal" data-index="0" disabled/.test(html), 'кнопка отключена при полном HP');
 
+/* --- 0.5.0: карточка бойца — уровень, опыт, снаряжение, перки --- */
+const soldier = S.recruits[0];
+soldier.xp = 150; // уровень 2 → доступен перк
+const rifle = State.addItem(S, 'pulse_rifle');
+context.smoke.open('squad');
+html = nodes['#app'].innerHTML;
+assert(html.includes('Ур. 2 · '), 'уровень и звание в карточке');
+assert(html.includes('class="xp-track"'), 'полоса опыта');
+assert(html.includes('gear-block') && html.includes('data-gear="weapon"'), 'блок снаряжения с тремя слотами');
+assert(html.includes('Импульсная винтовка'), 'предметы в списке снаряжения');
+assert(html.includes('data-action="perk"'), 'выбор перка при новом уровне');
+Game.equip(0, 'weapon', rifle.id);
+assert.equal(soldier.gear.weapon, rifle.id, 'оружие экипировано');
+rifle.durability = 5;
+context.smoke.open('squad');
+assert(nodes['#app'].innerHTML.includes('data-action="repair"'), 'кнопка починки при износе');
+const creditsBeforeRepair = S.res.credits;
+Game.action('repair', { dataset: { item: rifle.id } });
+assert.equal(rifle.durability, 10, 'починка восстанавливает прочность');
+assert(S.res.credits < creditsBeforeRepair, 'починка списывает кредиты');
+Game.action('perk', { dataset: { index: '0', perk: 'marksman' } });
+assert(soldier.perks.includes('marksman'), 'перк выбран из карточки');
+soldier.xp = 0; soldier.perks = []; soldier.gear = { weapon: null, armor: null, gadget: null };
+
 /* --- Экран рейда: динамические регионы и каркас --- */
 context.smoke.raid();
 html = nodes['#app'].innerHTML;
@@ -116,6 +140,7 @@ assert(html.includes('12,34К'), 'груз с сокращением в HUD');
 assert(html.includes('data-action="extract"'), 'кнопка эвакуации на шлюзе');
 assert(html.includes('id="raid-hud"') && html.includes('id="raid-log"') && html.includes('id="raid-crew"'), 'регионы рейда размечены');
 assert(html.includes('id="raid-loot"') && html.includes('id="raid-kits"'), 'груз и запас аптечек в разметке');
+assert(html.includes('id="raid-actions"') && html.includes('data-action="grenade"') && html.includes('data-action="retreat"'), 'действия рейда: граната и отступление');
 
 // Раненый боец в рейде не выбирается заново, но виден в HUD
 const selectedBefore = JSON.stringify(context.smoke.uiState().selected);
@@ -149,6 +174,21 @@ assert(out.includes('data-action="dismiss"'), 'кнопка возврата н�
 context.smoke.result(false);
 out = nodes['#app'].innerHTML;
 assert(out.includes('Добыча') && plain(out).includes('12 345'), 'старый формат отчёта не ломается');
+// Исход «отступление» отображается отдельным заголовком
+context.smoke.result();
+const retreatResult = context.smoke.profile().lastResult;
+retreatResult.outcome = 'retreat'; retreatResult.ok = false;
+context.smoke.render();
+assert(nodes['#app'].innerHTML.includes('ОТСТУПЛЕНИЕ'), 'итоги отображают отступление');
+// Исход «прикрытие отхода» и причина смерти
+context.smoke.result();
+const coverResult = context.smoke.profile().lastResult;
+coverResult.outcome = 'cover'; coverResult.ok = true; coverResult.cover = 'Орлов-31';
+coverResult.changes[1].cause = 'cover';
+context.smoke.render();
+out = nodes['#app'].innerHTML;
+assert(out.includes('ПРИКРЫТИЕ ОТХОДА'), 'итоги отображают прикрытие');
+assert(out.includes('погиб — прикрывал отход'), 'причина смерти в списке');
 
 /* --- Графики --- */
 context.smoke.stats();

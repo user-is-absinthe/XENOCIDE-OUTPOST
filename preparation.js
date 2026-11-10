@@ -26,7 +26,7 @@ window.Preparation = (() => {
     const candidates=r.crew.filter(c=>c.hp>0&&c.maxHp>0&&c.hp/c.maxHp<=.35);
     if(!candidates.length)return null;
     const unit=candidates.reduce((a,b)=>b.hp/b.maxHp<a.hp/a.maxHp?b:a);
-    const healed=Math.min(r.kitHeal||30,unit.maxHp-unit.hp);
+    const healed=Math.min((r.kitHeal||30)+(r.kitBonus||0),unit.maxHp-unit.hp);
     r.kits--;unit.hp+=healed;
     return {name:unit.name,healed,unit};
   }
@@ -39,6 +39,10 @@ window.Preparation = (() => {
     const kit=tiers[r.kitTier];
     if(r.kitPrice!=null&&r.kitPrice!==kit.price||r.kitHeal!=null&&r.kitHeal!==kit.heal)throw Error('Некорректные характеристики аптечек');
     r.kitPrice=kit.price;r.kitHeal=kit.heal;
+    r.kitBonus=Number.isFinite(r.kitBonus)&&r.kitBonus>=0?Math.floor(r.kitBonus):0;
+    r.findBonus=Number.isFinite(r.findBonus)&&r.findBonus>=0?r.findBonus:0;
+    r.grenadeUsed=!!r.grenadeUsed;
+    r.covered=!!r.covered;
     if(!Number.isInteger(r.kits)||!Number.isInteger(r.kitsBought)||r.kits<0||r.kits>r.kitsBought||r.kitsBought>r.kitCapacity||r.kitsBought<0)throw Error('Некорректный запас аптечек');
   }
   return {price,limit,tiers,orders,normalize,cost,target,useKit,restoreRaid};

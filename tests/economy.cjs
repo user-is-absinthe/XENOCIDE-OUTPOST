@@ -525,10 +525,201 @@ assert(GameUI.healthRow('Тест', 90, 100).includes('high'), 'зелёная �
 // Конфиг констант: баланс не трогали, но числа в одном месте
 assert.equal(Balance.buildings.cost, 85);
 assert.equal(Balance.hiring.cost, 20);
-assert.equal(Balance.version, '0.4.1');
+assert.equal(Balance.version, '0.5.0');
 assert.equal(Balance.profileVersion, 3);
 assert.equal(Balance.rewards.extractFlat, 12);
 assert.equal(Balance.routes.risk.reward, 1.5);
+
+/* --- 0.5.0: опыт, уровни, перки --- */
+const xpProfile = State.fresh(); xpProfile.res.credits = 0;
+const learner = State.recruit(xpProfile, false, 'medic');
+const baseAtk = learner.atk, baseMax = learner.maxHp;
+assert.equal(Progression.xpLevel(0), 1);
+assert.equal(Progression.xpLevel(99), 1);
+assert.equal(Progression.xpLevel(100), 2);
+assert.equal(Progression.xpLevel(250), 3);
+assert.equal(Progression.xpLevel(900), 5);
+assert.equal(Progression.xpLevel(9999), 5, 'уровень ограничен 5');
+assert.equal(Progression.xpProgress(150).level, 2);
+assert.equal(Progression.xpProgress(150).need, 150);
+const gain = State.grantXp(learner, 250);
+assert.equal(gain.level, 3, '250 XP → уровень 3');
+assert.equal(gain.levels, 2);
+assert.equal(learner.maxHp, baseMax + Balance.xp.hpPerLevel * 2, '+3 maxHp за уровень');
+assert.equal(learner.atk, baseAtk + Balance.xp.atkPerLevel * 2, '+1 урон за уровень');
+assert.equal(State.pendingPerks(learner), 1, 'уровень 3 даёт один перк (уровень 2)');
+assert.equal(State.applyPerk(learner, 'tough'), true);
+assert.equal(learner.maxHp, baseMax + 6 + 15, '«Крепкий» +15 maxHp');
+assert.equal(State.pendingPerks(learner), 0);
+assert.equal(State.applyPerk(learner, 'marksman'), false, 'нет свободного выбора перка');
+State.grantXp(learner, 700); // суммарно 950 — уровень 5
+assert.equal(Progression.xpLevel(learner.xp), 5);
+assert.equal(State.pendingPerks(learner), 1, 'уровень 4 даёт перк');
+assert.equal(State.applyPerk(learner, 'marksman'), true);
+assert.equal(learner.perks.length, 2, 'максимум два перка');
+assert.equal(State.applyPerk(learner, 'armored'), false, 'третий перк недоступен');
+assert.equal(learner.atk, baseAtk + 4 + 2, 'уровни и «Меткий» складываются');
+assert.equal(Balance.perks.list.seeker.find, 0.05);
+assert.equal(Balance.perks.list.veteran.veteran, 1);
+
+/* --- 0.5.0: снаряжение, снимок статов, один владелец --- */
+const gearProfile = State.fresh(); gearProfile.res.credits = 0;
+const gunner = State.recruit(gearProfile, false, 'engineer');
+const rifle = gearProfile.items.find(i => i.key === 'pulse_rifle');
+const plate = gearProfile.items.find(i => i.key === 'armor_plate');
+const cell = gearProfile.items.find(i => i.key === 'power_cell');
+assert.equal(State.equip(gearProfile, 0, 'weapon', rifle.id), true);
+assert.equal(State.equip(gearProfile, 0, 'armor', plate.id), true);
+assert.equal(State.equip(gearProfile, 0, 'gadget', cell.id), true);
+assert.equal(State.equip(gearProfile, 0, 'armor', rifle.id), false, 'предмет не того типа не экипируется');
+const snapEngineer = Battle.crewSnapshot(gearProfile, gunner);
+assert.equal(snapEngineer.atk, gunner.atk + 3 + 4, 'оружие и аккумулятор инженеру');
+assert.equal(snapEngineer.armor, gunner.armor + 2);
+State.recruit(gearProfile, true);
+State.equip(gearProfile, 1, 'weapon', rifle.id);
+assert.equal(gunner.gear.weapon, null, 'оружие ушло к новому владельцу');
+State.equip(gearProfile, 1, 'weapon', null);
+assert.equal(Battle.crewSnapshot(gearProfile, gearProfile.recruits[1]).atk, gearProfile.recruits[1].atk, 'classReq аккумулятора не даёт бонус бродяге');
+// «Экспериментальный плазморез» и «Стабилизатор прицела»
+const plasma = gearProfile.items.find(i => i.key === 'plasma_cutter');
+const scope = gearProfile.items.find(i => i.key === 'scope_stabilizer');
+State.equip(gearProfile, 1, 'weapon', plasma.id);
+State.equip(gearProfile, 1, 'gadget', scope.id);
+const snapPlasma = Battle.crewSnapshot(gearProfile, gearProfile.recruits[1]);
+assert.equal(snapPlasma.atk, gearProfile.recruits[1].atk + 5);
+assert.equal(snapPlasma.pierce, 1);
+// износ за рейд и починка
+const gearRaid = State.fresh(); gearRaid.res.credits = 0;
+const wearer = State.recruit(gearRaid, false, 'engineer');
+const wRifle = gearRaid.items.find(i => i.key === 'pulse_rifle');
+State.equip(gearRaid, 0, 'weapon', wRifle.id);
+Battle.deploy(gearRaid, [0]);
+Battle.finish(gearRaid, true);
+assert.equal(State.findItem(gearRaid, wRifle.id).durability, 9, 'оружие теряет 1 прочность за рейд');
+const brokenProfile = State.fresh(); brokenProfile.res.credits = 0;
+const soldier = State.recruit(brokenProfile, false, 'engineer');
+const bRifle = brokenProfile.items.find(i => i.key === 'pulse_rifle');
+State.equip(brokenProfile, 0, 'weapon', bRifle.id);
+bRifle.durability = 0;
+assert.equal(Battle.crewSnapshot(brokenProfile, soldier).atk, soldier.atk, 'сломанный предмет не действует');
+brokenProfile.res.credits = 100;
+assert.equal(State.repairCost(bRifle), 10 * Balance.gear.repairPerPoint);
+assert.equal(State.repairItem(brokenProfile, bRifle.id).ok, true);
+assert.equal(bRifle.durability, 10);
+assert.equal(brokenProfile.res.credits, 100 - 50);
+assert.equal(State.repairItem(brokenProfile, bRifle.id).reason, 'full');
+
+/* --- 0.5.0: граната --- */
+const grProfile = State.fresh(); grProfile.res.credits = 0;
+grProfile.recruits = [{ id: 1, name: 'G', class: 'assault', hp: 90, maxHp: 90, atk: 12, armor: 2, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }];
+const nade = grProfile.items.find(i => i.key === 'frag_grenade');
+State.equip(grProfile, 0, 'gadget', nade.id);
+Battle.deploy(grProfile, [0]);
+grProfile.raid.seed = 3;
+grProfile.raid.foes = [{ type: 0, hp: 14, maxHp: 40, attackFactor: 1, rewardFactor: 1 }, { type: 1, hp: 40, maxHp: 40, attackFactor: 1, rewardFactor: 1 }];
+assert.equal(Battle.canGrenade(grProfile), true);
+const gren = Battle.grenade(grProfile);
+assert.equal(gren.ok, true);
+assert.equal(grProfile.raid.foes[0].hp, 0, 'граната добивает слабого');
+assert.equal(grProfile.raid.foes[1].hp, 25);
+assert(!grProfile.items.some(i => i.key === 'frag_grenade'), 'граната расходуется');
+assert.equal(grProfile.raid.grenadeUsed, true);
+assert.equal(Battle.grenade(grProfile).ok, false, 'один раз за бой');
+assert(gren.events.some(e => e.t === 'grenade'));
+assert(gren.events.some(e => e.t === 'kill'));
+assert.equal(Battle.formatEvent(gren.events[0]), 'Граната: −15 HP всем противникам.');
+grProfile.raid.cleared = true;
+Battle.advance(grProfile);
+assert.equal(grProfile.raid.grenadeUsed, false, 'следующий сектор — граната снова доступна');
+
+/* --- 0.5.0: отступление --- */
+const retProfile = State.fresh(); retProfile.res.credits = 100; retProfile.prep = { order: 'front', kits: 2 };
+for (let i = 0; i < 4; i++) State.recruit(retProfile, false);
+Battle.deploy(retProfile, [0, 1, 2, 3]);
+const retSpent = retProfile.res.credits;
+retProfile.raid.loot = 80; retProfile.raid.lootBattle = 80; retProfile.raid.depth = 7;
+assert.equal(Battle.retreat(retProfile), true);
+assert.equal(retProfile.raid, null);
+assert.equal(retProfile.lastResult.outcome, 'retreat');
+assert.equal(retProfile.lastResult.ok, false);
+assert.equal(retProfile.lastResult.loot.cargo, Math.floor(80 * Balance.combat.retreatCargo), 'половина груза');
+assert.equal(retProfile.lastResult.loot.refund, 0, 'аптечки не возвращаются');
+assert.equal(retProfile.res.credits, retSpent + 40);
+assert.equal(retProfile.stats.byDepth['5-9'].runs, 1);
+assert.equal(retProfile.stats.byDepth['5-9'].evac, 0, 'отступление не эвакуация');
+
+/* --- 0.5.0: прикрытие отхода --- */
+const covProfile = State.fresh(); covProfile.res.credits = 0;
+covProfile.recruits = ['heavy', 'medic', 'assault', 'engineer'].map((c, i) => ({ id: i + 1, name: 'C' + i, class: c, hp: 90, maxHp: 90, atk: 12, armor: 2, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }));
+Battle.deploy(covProfile, [0, 1, 2, 3]);
+covProfile.raid.depth = 6;
+covProfile.raid.crew[1].hp = 8;
+covProfile.raid.loot = 100; covProfile.raid.lootBattle = 100;
+assert.equal(Battle.canCover(covProfile), true);
+assert.equal(Battle.cover(covProfile), true);
+assert.equal(covProfile.lastResult.outcome, 'cover');
+assert.equal(covProfile.lastResult.ok, true);
+assert.equal(covProfile.lastResult.cover, 'C1', 'прикрывает самый раненый');
+assert.equal(covProfile.lastResult.changes.find(c => c.id === 2).cause, 'cover', 'причина смерти — прикрытие');
+assert.equal(covProfile.lastResult.loot.cargo, 100 + 12 + Math.floor(6 / 2), 'полный груз и бонус эвакуации');
+assert.equal(covProfile.recruits.length, 3, 'погибший исключён');
+assert.equal(Battle.cover(covProfile), false, 'прикрытие один раз за рейд');
+
+/* --- 0.5.0: страховой маяк --- */
+const beaconProfile = State.fresh(); beaconProfile.res.credits = 0;
+beaconProfile.recruits = [{ id: 1, name: 'B', class: 'heavy', hp: 5, maxHp: 5, atk: 1, armor: 0, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }];
+const beacon = beaconProfile.items.find(i => i.key === 'safety_beacon');
+State.equip(beaconProfile, 0, 'gadget', beacon.id);
+Battle.deploy(beaconProfile, [0]);
+assert.equal(beaconProfile.raid.crew[0].saveBeacon, true);
+beaconProfile.raid.seed = 1;
+beaconProfile.raid.foes = [{ type: 4, hp: 999, maxHp: 999, attackFactor: 1, rewardFactor: 1 }];
+const beaconTurn = Battle.turn(beaconProfile);
+assert(beaconTurn.events.some(e => e.t === 'save'), 'маяк срабатывает');
+assert.equal(beaconProfile.raid.crew[0].hp, 1, 'боец держится на 1 HP');
+assert(!beaconProfile.items.some(i => i.key === 'safety_beacon'), 'маяк расходуется');
+assert.equal(Battle.formatEvent({ t: 'save', target: { name: 'Ким' } }), 'Ким: страховой маяк компенсировал смертельный удар, боец держится на 1 HP.');
+assert.equal(Battle.formatEvent({ t: 'gear', name: 'Бронепластина' }), 'Найден предмет: Бронепластина.');
+
+/* --- 0.5.0: дроп предметов --- */
+const dropProfile = State.fresh();
+dropProfile.raid = { depth: 5, seed: 42, crew: [{ id: 1, hp: 50, maxHp: 90, deployHp: 90 }], foes: [{ hp: 0 }], loot: 0, lootCache: 0, lootBattle: 0, log: [], kits: 0, kitsBought: 0, kitTier: 1, kitPrice: 12, kitHeal: 30, kitCapacity: 3, speed: 1, cleared: false, findBonus: 0, kitBonus: 0 };
+const itemsBefore = dropProfile.items.length;
+Battle.clearSector(dropProfile);
+assert(dropProfile.items.length > itemsBefore, 'с босса — гарантированный предмет');
+let cacheTotal = 0, cacheDrops = 0;
+for (let i = 0; i < 1000; i++) {
+  const p = State.fresh();
+  p.raid = { depth: 1, seed: (i * 2654435761) >>> 0, crew: [{ hp: 20, maxHp: 90, deployHp: 90 }], foes: [{ hp: 0 }], loot: 0, lootCache: 0, lootBattle: 0, log: [], kits: 0, kitsBought: 0, kitTier: 1, kitPrice: 12, kitHeal: 30, kitCapacity: 3, speed: 1, cleared: false, findBonus: 0, kitBonus: 0 };
+  Battle.clearSector(p);
+  if (p.raid.sectorEvent && p.raid.sectorEvent.kind === 'cache') { cacheTotal++; if (p.items.length > 12) cacheDrops++; }
+}
+assert(cacheTotal > 200, 'тайников достаточно для выборки: ' + cacheTotal);
+assert(cacheDrops > cacheTotal * 0.15 && cacheDrops < cacheTotal * 0.35, 'предмет из тайника ~25%: ' + cacheDrops + '/' + cacheTotal);
+
+/* --- 0.5.0: миграция старых сейвов (строковый инвентарь, без xp/перков) --- */
+let legacy = State.fresh(); legacy.v = 3;
+legacy.items = ['Импульсная винтовка', 'Неизвестный хлам'];
+legacy.recruits = [{ id: 9, name: 'Старый-1', class: 'heavy', hp: 70, maxHp: 70, atk: 10, armor: 2, gear: null }];
+let legacyOut = State.migrate(legacy);
+assert.equal(legacyOut.items.length, 1, 'известное имя → предмет, неизвестное отброшено');
+assert.equal(legacyOut.items[0].key, 'pulse_rifle');
+assert.equal(legacyOut.items[0].durability, 10);
+assert.equal(legacyOut.recruits[0].xp, 0);
+assert.deepEqual(norm(legacyOut.recruits[0].perks), []);
+assert.deepEqual(norm(legacyOut.recruits[0].gear), { weapon: null, armor: null, gadget: null });
+
+/* --- 0.5.0: опыт начисляется выжившим в бою --- */
+const xpFinish = State.fresh(); xpFinish.res.credits = 0;
+xpFinish.recruits = ['heavy', 'medic'].map((c, i) => ({ id: i + 1, name: 'X' + i, class: c, hp: 90, maxHp: 90, atk: 12, armor: 2, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }));
+Battle.deploy(xpFinish, [0, 1]);
+xpFinish.raid.depth = 10;
+xpFinish.raid.crew[1].hp = 0;
+const xpResult = Battle.finish(xpFinish, true);
+const xpExpected = Balance.xp.perDepth * 10 + Balance.xp.perBoss * 2;
+assert.equal(xpResult.changes.find(c => c.id === 1).xp, xpExpected, 'выживший получает опыт за глубину и боссов');
+assert.equal(xpResult.changes.find(c => c.id === 2).xp, 0, 'погибший опыт не получает');
+assert.equal(xpFinish.recruits.find(x => x.id === 1).xp, xpExpected);
 
 /* --- Детерминированные бои на десяти seed --- */
 let wins = 0;

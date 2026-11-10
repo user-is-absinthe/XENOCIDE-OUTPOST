@@ -68,6 +68,7 @@ window.Input = (() => {
     document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => Game.setTab(b.dataset.tab));
     document.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => Game.pick(+b.dataset.pick));
     document.querySelectorAll('[data-up]').forEach(b => bindUpgrade(b));
+    document.querySelectorAll('[data-gear]').forEach(sel => sel.onchange = () => Game.equip(+sel.dataset.index, sel.dataset.slot, sel.value || null));
     document.querySelectorAll('[data-action]').forEach(b => b.onclick = () => Game.action(b.dataset.action, b));
     const input = document.querySelector('#import');
     if (input) input.onchange = () => Game.importFile(input.files && input.files[0]);

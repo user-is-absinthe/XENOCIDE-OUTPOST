@@ -10,6 +10,68 @@ window.Screens = (() => {
 
   const hpTier = (hp, max) => { const pct = Math.max(0, Math.min(100, (hp / Math.max(1, max)) * 100)); return pct > 60 ? 'high' : pct >= 30 ? 'mid' : 'low'; };
 
+  const SLOT_NAMES = { weapon: 'Оружие', armor: 'Броня', gadget: 'Гаджет' };
+
+  /* Строка-описание предмета для выпадающего списка снаряжения. */
+  function itemLabel(item) {
+    const def = State.itemDef(item);
+    if (!def) return State.itemName(item);
+    const bits = [];
+    if (def.atk) bits.push((def.atk > 0 ? '+' : '') + def.atk + ' урон');
+    if (def.armor) bits.push((def.armor > 0 ? '+' : '') + def.armor + ' броня');
+    if (def.kit) bits.push('+' + def.kit + ' к аптечкам');
+    if (def.find) bits.push('+' + Math.round(def.find * 100) + '% находок');
+    if (def.boss) bits.push('+' + def.boss + ' по боссам');
+    if (def.pierce) bits.push('+' + def.pierce + ' пробития');
+    if (def.grenade) bits.push('граната ' + def.grenade);
+    if (def.beacon) bits.push('спасает от смерти');
+    if (def.classReq) bits.push('только ' + (classes[def.classReq] || def.classReq));
+    return def.name + (bits.length ? ' · ' + bits.join(', ') : '');
+  }
+
+  /* Полоса опыта и звание (ранг = уровень − 1). */
+  function xpTrack(member) {
+    const p = Progression.xpProgress(member.xp);
+    const label = p.need ? p.into + ' / ' + p.need + ' XP' : 'максимум';
+    return `<div class="xp-line"><span class="xp-rank">Ур. ${p.level} · ${Progression.ranks[p.level - 1]}</span><div class="xp-track" role="img" aria-label="Опыт ${label}"><span style="width:${Math.round(p.ratio * 100)}%"></span></div><span class="xp-value">${label}</span></div>`;
+  }
+
+  /* Блок «Снаряжение»: три слота-списка и починка изношенного. */
+  function gearBlock(s, member, index, deployed) {
+    const items = s.items || [];
+    const otherOwner = id => { const o = State.gearOwner(s, id); return o && o.recruit !== member ? o.recruit.name : null; };
+    const slots = ['weapon', 'armor', 'gadget'].map(slot => {
+      const equipped = member.gear && member.gear[slot];
+      const opts = items.filter(it => (State.itemDef(it) || {}).type === slot).map(it => {
+        const def = State.itemDef(it);
+        if (def.classReq && def.classReq !== member.class) return '';
+        const owner = otherOwner(it.id);
+        const label = itemLabel(it) + ' · ' + it.durability + '/' + def.durability + (it.durability === 0 ? ' · сломан' : '') + (owner ? ' (у ' + owner + ')' : '');
+        return `<option value="${it.id}" ${equipped === it.id ? 'selected' : ''}>${h(label)}</option>`;
+      }).join('');
+      const cur = equipped ? State.findItem(s, equipped) : null;
+      const cost = cur ? State.repairCost(cur) : 0;
+      return `<div class="gear-slot"><span class="gear-slot-name">${SLOT_NAMES[slot]}</span><select id="gear-${index}-${slot}" data-gear="${slot}" data-index="${index}" ${deployed ? 'disabled' : ''} aria-label="${SLOT_NAMES[slot]}"><option value="">— пусто —</option>${opts}</select>${cost > 0 ? `<button type="button" class="gear-repair" id="repair-${index}-${slot}" data-action="repair" data-item="${equipped}" ${deployed || s.res.credits < cost ? 'disabled' : ''}>Починить · ₡ ${cash(cost)}</button>` : ''}</div>`;
+    }).join('');
+    return `<div class="gear-block"><span class="gear-title">Снаряжение</span>${slots}</div>`;
+  }
+
+  /* Выбор перка на уровнях 2 и 4 (в карточке и в итогах). */
+  function perkPicker(member, index) {
+    if (!member || State.pendingPerks(member) <= 0) return '';
+    const options = Object.entries(Balance.perks.list).filter(([k]) => !(member.perks || []).includes(k))
+      .map(([k, p]) => `<button type="button" class="perk-option" data-action="perk" data-index="${index}" data-perk="${k}"><strong>${h(p.name)}</strong><span>${h(p.text)}</span></button>`).join('');
+    return `<div class="perk-picker"><span class="perk-title">Новый уровень · выберите перк (${(member.perks || []).length}/${Balance.perks.max})</span><div class="perk-options">${options}</div></div>`;
+  }
+
+  /* Действия рейда: граната, отступление, прикрытие отхода. */
+  function raidActionsHtml(s, ui) {
+    const r = s.raid;
+    if (!r) return '';
+    const alive = r.crew.some(c => c.hp > 0);
+    return `<div class="raid-actions"><button data-action="grenade" ${Battle.canGrenade(s) ? '' : 'disabled'} title="15 урона всем живым врагам, один раз за бой">Граната</button><button data-action="retreat" ${alive ? '' : 'disabled'}>Отступить</button>${Battle.canCover(s) ? '<button class="danger" data-action="cover" title="Самый раненый остаётся прикрывать отход">Прикрыть отход</button>' : ''}</div>`;
+  }
+
   function menu(s, ui) {
     return `<div class="menu-stage"><canvas id="menu-demo" width="800" height="350" aria-hidden="true"></canvas><div class="menu-dim" aria-hidden="true"></div>
  <div class="title-screen"><div class="title-mark">XENOCIDE<br><strong>OUTPOST</strong></div><p>ПОСТ «КОВЧЕГ» · ВНЕШНИЙ ПЕРИМЕТР</p>
@@ -35,10 +97,11 @@ window.Screens = (() => {
       const label = r.hp >= max ? 'Здоров' : 'Лечить · ₡ ' + cash(price);
       return `<div class="crew-card ${sel ? 'selected' : ''}">
  <button type="button" class="crew-select" data-pick="${i}" aria-pressed="${sel}" ${pickDisabled ? 'disabled' : ''}>
-  <span class="crew-card-head"><span class="class-icon ${r.class}">${classes[r.class].slice(0, 1)}</span><span><strong>${h(r.name)}</strong><span class="muted">${classes[r.class]} · ${r.class === 'vagrant' ? 'Без подготовки' : Progression.ranks[r.training || 0]}</span></span><span class="pick-mark">${sel ? '✓' : '+'}</span></span>
+  <span class="crew-card-head"><span class="class-icon ${r.class}">${classes[r.class].slice(0, 1)}</span><span><strong>${h(r.name)}</strong><span class="muted">${classes[r.class]} · ${Progression.ranks[Progression.xpLevel(r.xp) - 1]}</span></span><span class="pick-mark">${sel ? '✓' : '+'}</span></span>
   <span class="crew-stats"><span><b>${Math.ceil(r.hp)} / ${max}</b> HP</span><span><b>${r.atk}</b> урон</span><span><b>${r.armor}</b> броня</span></span>
   <span class="role-description">${classHelp[r.class] || ''}</span>
  </button>
+ <div class="crew-card-meta">${xpTrack(r)}${gearBlock(s, r, i, deployed)}${deployed ? '' : perkPicker(r, i)}</div>
  <div class="crew-card-foot"><div class="hp-track ${hpTier(r.hp, max)}" role="img" aria-label="Здоровье ${Math.ceil(r.hp)} из ${max}"><span style="width:${Math.max(0, Math.min(100, r.hp / max * 100))}%"></span></div><button type="button" class="crew-heal" data-action="heal" data-index="${i}" ${healDisabled ? 'disabled' : ''}>${label}</button></div>
 </div>`;
     }).join('');
@@ -56,6 +119,7 @@ window.Screens = (() => {
     const r = s.raid, checkpoint = r.cleared && r.depth % Balance.raid.checkpointEvery === 0;
     return `<div class="grid battle-layout"><div class="panel"><div class="battlehud" id="raid-hud">${hudHtml(s, ui)}</div>
  <div class="route-track" id="route-track">${routeTrackHtml(r)}</div>
+ <div id="raid-actions">${raidActionsHtml(s, ui)}</div>
  <canvas id="arena" width="800" height="350"></canvas>
  <div class="sector-status" role="status" id="sector-status">${statusHtml(s, ui)}</div>
  <div id="raid-event-wrap">${eventHtml(s)}</div>
@@ -117,27 +181,39 @@ window.Screens = (() => {
   }
 
   function result(s, ui) {
-    const win = ui.overlay === 'win', res = s.lastResult;
-    const title = win ? 'ЭВАКУАЦИЯ УСПЕШНА' : 'ОТРЯД ПОТЕРЯН';
-    const intro = win ? 'Груз доставлен на базу. Можно готовить следующий отряд.' : 'Павшие исключены из списка. Бесплатные бродяги помогут восстановиться.';
+    const res = s.lastResult;
+    const win = res ? res.ok : ui.overlay === 'win';
+    const outcome = res ? (res.outcome || (win ? 'evac' : 'defeat')) : (win ? 'evac' : 'defeat');
+    const titles = { evac: 'ЭВАКУАЦИЯ УСПЕШНА', cover: 'ПРИКРЫТИЕ ОТХОДА', retreat: 'ОТСТУПЛЕНИЕ', defeat: 'ОТРЯД ПОТЕРЯН' };
+    const intros = {
+      evac: 'Груз доставлен на базу. Можно готовить следующий отряд.',
+      cover: 'Отряд прорвался с полным грузом. Один боец остался прикрывать отход.',
+      retreat: 'Командир приказал отступать. Часть груза потеряна, выжившие вернулись ранеными.',
+      defeat: 'Павшие исключены из списка. Бесплатные бродяги помогут восстановиться.'
+    };
+    const title = titles[outcome] || titles[win ? 'evac' : 'defeat'];
+    const intro = intros[outcome] || intros[win ? 'evac' : 'defeat'];
     let body;
     if (!res) { // совместимость со старыми отчётами
       body = `<div class="result-rewards"><div><span>Добыча</span><strong>₡ ${cash(s.lastLoot || 0, win)}</strong></div><div><span>Возврат припасов</span><strong>₡ ${cash(s.lastRefund || 0, win)}</strong></div></div>`;
     } else {
       const changes = res.changes.map(c => {
-        if (c.status === 'dead') return `<div class="change-row dead"><span>${h(c.name)}</span><strong>погиб</strong></div>`;
+        const xp = c.xp ? ` <em class="xp-gain">+${c.xp} XP${c.levelUp ? ' · ур. ' + c.level : ''}</em>` : '';
+        if (c.status === 'dead') return `<div class="change-row dead"><span>${h(c.name)}</span><strong>${c.cause === 'cover' ? 'погиб — прикрывал отход' : 'погиб'}</strong></div>`;
         const delta = Math.ceil(c.after) - Math.ceil(c.before);
-        if (delta === 0) return `<div class="change-row"><span>${h(c.name)}</span><strong>без изменений</strong></div>`;
-        return `<div class="change-row"><span>${h(c.name)}</span><strong>${delta > 0 ? '+' : '−'}${Math.abs(delta)} HP (${Math.ceil(c.before)} → ${Math.ceil(c.after)})</strong></div>`;
+        const hp = delta === 0 ? 'без изменений' : `${delta > 0 ? '+' : '−'}${Math.abs(delta)} HP (${Math.ceil(c.before)} → ${Math.ceil(c.after)})`;
+        return `<div class="change-row"><span>${h(c.name)}${xp}</span><strong>${hp}</strong></div>`;
       }).join('');
       const loot = res.loot;
       const losses = [];
       if (!win && res.losses.kits) losses.push(`<div class="change-row dead"><span>Аптечки не вернулись</span><strong>₡ ${cash(res.losses.kits * res.losses.kitPrice, true)}</strong></div>`);
       if (!win && res.losses.cargo) losses.push(`<div class="change-row dead"><span>Груз потерян</span><strong>₡ ${cash(res.losses.cargo, true)}</strong></div>`);
       if (res.slowHealed) losses.push(`<div class="change-row"><span>Медблок · медленное лечение</span><strong>+${res.slowHealed} HP</strong></div>`);
+      const pendingIdx = s.recruits.findIndex(x => State.pendingPerks(x) > 0);
+      const perks = pendingIdx >= 0 ? perkPicker(s.recruits[pendingIdx], pendingIdx) : '';
       body = `<div class="result-changes"><h3>Изменения в отряде</h3>${changes}</div>
- <div class="result-rewards"><div><span>За бои</span><strong>₡ ${cash(loot.battle, true)}</strong></div><div><span>Тайники</span><strong>₡ ${cash(loot.cache, true)}</strong></div>${win ? `<div><span>Бонус эвакуации</span><strong>₡ ${cash(loot.extract, true)}</strong></div>` : ''}<div><span>Возврат припасов</span><strong>₡ ${cash(loot.refund, true)}</strong></div><div class="total"><span>Итого на базу</span><strong>₡ ${cash((s.lastLoot || 0) + (s.lastRefund || 0), true)}</strong></div></div>
- ${losses.length ? `<div class="result-losses"><h3>Потери и восстановление</h3>${losses.join('')}${res.losses.dead.length ? `<p class="muted">Не вернулись: ${res.losses.dead.map(h).join(', ')}.</p>` : ''}</div>` : ''}`;
+ <div class="result-rewards"><div><span>За бои</span><strong>₡ ${cash(loot.battle, true)}</strong></div><div><span>Тайники</span><strong>₡ ${cash(loot.cache, true)}</strong></div>${res.ok ? `<div><span>Бонус эвакуации</span><strong>₡ ${cash(loot.extract, true)}</strong></div>` : ''}<div><span>Возврат припасов</span><strong>₡ ${cash(loot.refund, true)}</strong></div><div class="total"><span>Итого на базу</span><strong>₡ ${cash((s.lastLoot || 0) + (s.lastRefund || 0), true)}</strong></div></div>
+ ${losses.length ? `<div class="result-losses"><h3>Потери и восстановление</h3>${losses.join('')}${res.losses.dead.length ? `<p class="muted">Не вернулись: ${res.losses.dead.map(h).join(', ')}.</p>` : ''}</div>` : ''}${perks}`;
     }
     return `<div class="overlay result-screen"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>ОТЧЁТ · ОПЕРАЦИЯ ${s.run}</small><h2 id="dialog-title">${title}</h2><p>${intro}</p>${body}<button class="primary wide" data-action="dismiss">Вернуться на базу →</button></div></div>`;
   }
@@ -206,7 +282,7 @@ window.Screens = (() => {
   }
 
   return {
-    h, cash, classes, classHelp, buildingNames, hpTier,
+    h, cash, classes, classHelp, buildingNames, hpTier, SLOT_NAMES, itemLabel, xpTrack, gearBlock, perkPicker, raidActionsHtml,
     menu, base, squad, raid, save, result, stats, dialog,
     hudHtml, routeTrackHtml, statusHtml, eventHtml, logHtml, kitsHtml,
     preparation, autoMessage, automation, drawStats, drawBars
