@@ -28,7 +28,7 @@ window.Preparation = (() => {
     const unit=candidates.reduce((a,b)=>b.hp/b.maxHp<a.hp/a.maxHp?b:a);
     const healed=Math.min(r.kitHeal||30,unit.maxHp-unit.hp);
     r.kits--;unit.hp+=healed;
-    return {name:unit.name,healed};
+    return {name:unit.name,healed,unit};
   }
   function restoreRaid(r){
     if(!r)return;

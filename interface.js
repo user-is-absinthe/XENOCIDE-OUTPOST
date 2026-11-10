@@ -27,7 +27,8 @@ window.GameUI = (() => {
   function healthRow(name,hp,maxHp,hostile=false){
     const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const current=Math.max(0,Number(hp)||0),max=Math.max(1,Number(maxHp)||1),percent=Math.min(100,current/max*100);
-    return '<div class="health-row '+(hostile?'hostile ':'')+(current===0?'fallen':'')+'"><div><span>'+escape(name)+'</span><strong>'+(current===0?'Погиб':Math.ceil(current)+' / '+Math.ceil(max))+'</strong></div><div class="health-track"><span style="width:'+percent+'%"></span></div></div>';
+    const tier=current===0?'fallen':hostile?'':percent>60?'high':percent>=30?'mid':'low';
+    return '<div class="health-row '+(hostile?'hostile ':'')+tier+'"><div><span>'+escape(name)+'</span><strong>'+(current===0?'Погиб':Math.ceil(current)+' / '+Math.ceil(max))+'</strong></div><div class="health-track"><span style="width:'+percent+'%"></span></div></div>';
   }
   function money(value,exact=false){
     const n=Math.max(0,Math.floor(Number(value)||0));

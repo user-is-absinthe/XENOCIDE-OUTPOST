@@ -82,6 +82,8 @@ button:disabled{opacity:.53}
 .health-track{height:5px;background:#0a151a;border-radius:3px;overflow:hidden}
 .health-track span{display:block;height:100%;background:#79c9af}
 .health-row.hostile .health-track span{background:#d19378}
+.health-row.mid .health-track span{background:#e0b06b}
+.health-row.low .health-track span{background:#d1715f}
 .health-row.fallen{color:#ba8b83}
 .log-title{font-size:12px!important;color:#99b4b8;margin:18px 0 8px!important;text-transform:uppercase;letter-spacing:1px}
 .log{line-height:1.65;height:140px;border-radius:4px;font-family:"Segoe UI",sans-serif}
@@ -98,7 +100,7 @@ button:disabled{opacity:.53}
 .title-screen{border-radius:8px}
 @media(max-width:1000px){.squad-layout{grid-template-columns:1fr}.squad-aside{position:static;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}.battle-layout{grid-template-columns:minmax(0,1fr) 250px}}
 @media(max-width:760px){header h1{font-size:18px;letter-spacing:1px}header small{font-size:8px}#resources{padding:6px 10px}#resources strong{font-size:19px}nav{overflow-x:auto;gap:4px}nav button{padding:9px 12px;font-size:12px;white-space:nowrap}.page-heading{flex-wrap:wrap}.page-heading h2{font-size:24px}.base-metrics{gap:7px}.base-metrics>div{flex-direction:column;align-items:flex-start;padding:10px;font-size:11px}.base-metrics strong{font-size:22px}.squad-slots{grid-template-columns:repeat(2,minmax(0,1fr))}.squad-aside,.battle-layout{grid-template-columns:1fr}.section-heading{flex-wrap:wrap}.crew{grid-template-columns:1fr}.hire-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.panel{padding:15px}.dialog{padding:20px}.overlay{padding:12px}.dialog{max-height:calc(100dvh - 24px)}footer span{float:none;display:block;margin-top:8px}}
-@media(prefers-reduced-motion:reduce){button,.button{transition:none}}
+@media(prefers-reduced-motion:reduce){button,.button{transition:none}*{transition:none!important;animation:none!important}.hp-track>span{transition:none}.menu-stage #menu-demo{filter:brightness(.3)}}
 .raid-reminder,.speed-settings{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
 .raid-reminder{padding:12px 18px;margin-bottom:16px;border:1px solid #587566;background:#142b29;color:#c4e4d6}
 .auto-choice{margin:16px 0;padding:14px;border:1px solid #527c71;border-radius:6px;background:#132c29}
@@ -106,3 +108,43 @@ button:disabled{opacity:.53}
 .auto-choice small{display:block;margin-top:12px;color:#b6c8c1;line-height:1.5}
 .upgrade-current{line-height:1.6;color:#b5c5c1;min-height:80px}
 .bulk-upgrade{margin-top:6px;padding:6px 10px;font-size:12px}
+
+/* --- 0.4.0 «Раны и события» --- */
+/* Карточка бойца: выбор + полоса HP + платное лечение */
+.crew-card{padding:0;gap:0;overflow:hidden}
+.crew-select{display:flex;flex-direction:column;gap:12px;padding:16px;text-align:left;background:transparent;border:0;color:inherit;font:inherit;font-weight:400;width:100%}
+.crew-select:hover:not(:disabled){background:#1b3138}
+.crew-select:disabled:hover{background:transparent}
+.crew-card-foot{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid #38524f;background:#101e24}
+.hp-track{flex:1;height:8px;background:#0a151a;border-radius:4px;overflow:hidden;min-width:60px}
+.hp-track>span{display:block;height:100%;background:#79c9af;transition:width .2s}
+.hp-track.mid>span{background:#e0b06b}
+.hp-track.low>span{background:#d1715f}
+.crew-heal{min-height:30px;padding:4px 11px;font-size:12px;white-space:nowrap;flex-shrink:0}
+
+/* Главное меню: затемнённая живая сцена за панелью */
+.menu-stage{position:relative;min-height:65vh;display:flex;align-items:center;justify-content:center;border:1px solid #294449;overflow:hidden;border-radius:8px}
+.menu-stage #menu-demo{position:absolute;left:0;top:50%;transform:translateY(-50%);width:100%;height:auto;border:0;filter:brightness(.35) saturate(.85);pointer-events:none;z-index:0}
+.menu-stage .menu-dim{position:absolute;inset:0;background:#00000066;pointer-events:none;z-index:1}
+.menu-stage .title-screen{position:relative;z-index:2;min-height:65vh;width:100%;background:transparent;border:0}
+.title-screen .warn{background:#3a2c14ee;border:1px solid #8a6a2e;padding:8px 14px;border-radius:5px;letter-spacing:.04em;font-size:13px}
+
+/* Итоги рейда: изменения по бойцам, разбивка добычи, потери */
+.result-changes,.result-losses{margin:18px 0;text-align:left}
+.result-changes h3,.result-losses h3{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#9fb8b7;margin:0 0 8px}
+.change-row{display:flex;justify-content:space-between;gap:12px;padding:6px 8px;border-bottom:1px solid #24363b;font-size:13px}
+.change-row strong{font-family:monospace;color:#cfe4dc;white-space:nowrap}
+.change-row.dead strong{color:#e08b7c}
+.result-rewards>div.total{grid-column:1/-1;background:#153029;border-color:#5b9e90}
+.result-rewards>div.total strong{color:#a8f0de}
+
+/* Статистика и графики */
+.stats-panel .chart-block{margin-bottom:26px}
+.chart-block h3{margin:0 0 4px;font-size:17px}
+.chart-block .muted{margin:0 0 10px;font-size:13px}
+.chart-block canvas{width:100%;height:auto;image-rendering:auto;border:1px solid #22343a;border-radius:4px}
+
+/* Диалоги подтверждений */
+.dialog-overlay .dialog .actions{gap:10px}
+.danger.primary{background:#4a2a28;color:#ffd2c9;border-color:#a0655e}
+.danger.primary:hover:not(:disabled){background:#633733}
