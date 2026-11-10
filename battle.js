@@ -396,7 +396,7 @@ window.Battle = (() => {
       const id = c.gear && c.gear[slot];
       if (id == null) continue;
       const item = State.findItem(S, id);
-      if (item) item.durability = Math.max(0, item.durability - Balance.gear.wearPerRaid);
+      if (item) item.durability = Math.max(0, State.itemDurability(item) - Balance.gear.wearPerRaid);
     }
     S.recruits = S.recruits.filter(x => !deployed.has(x.id) || survivors.has(x.id));
     const byId = new Map((r.crew || []).map(c => [c.id, c]));

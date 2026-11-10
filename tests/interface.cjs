@@ -59,6 +59,10 @@ const smokeSource = fs.readFileSync('game.js', 'utf8').replace('render();request
   render()},
  profile:()=>S,
  uiState:()=>uiState(),
+ stepOverlay:ms=>stepOverlay(ms),
+ pause:v=>{paused=v},
+ event:kind=>{S.raid={crew:[{id:1,name:'Тест',class:'heavy',hp:100,maxHp:100,deployHp:100,gear:{weapon:null,armor:null,gadget:null}}],depth:2,cleared:true,loot:0,speed:Automation.validSpeed(S.settings&&S.settings.speed),log:[],kits:0,kitsBought:0,kitTier:1,kitHeal:30,kitPrice:12,foes:[],roomEvent:{kind},roomEventSeen:true};screen='game';tab='raid';overlay='event';paused=false;dialog=null;armOverlayTimer();render()},
+ story:()=>{S.raid={crew:[{id:1,name:'Тест',class:'heavy',hp:100,maxHp:100,deployHp:100,gear:{weapon:null,armor:null,gadget:null}}],depth:6,cleared:true,loot:0,speed:Automation.validSpeed(S.settings&&S.settings.speed),log:[],kits:0,kitsBought:0,kitTier:1,kitHeal:30,kitPrice:12,foes:[],story:{id:'s05',title:'ПЕРВЫЙ КОНТАКТ',text:'Тишина в эфире.'}};screen='game';tab='raid';overlay='story';paused=false;dialog=null;armOverlayTimer();render()},
  dialog:d=>{dialog=d;render()}
 };`);
 vm.runInNewContext(smokeSource, context);
@@ -74,7 +78,7 @@ assert(menuHtml.includes('data-action="stats"'), 'кнопка «Статист�
 assert(menuHtml.includes('id="menu-demo"'), 'живая сцена в меню');
 assert(menuHtml.includes('menu-dim'), 'затемнение поверх сцены');
 assert(menuHtml.includes('pointer-events:none') === false, 'стили — в CSS, не инлайном');
-assert(menuHtml.includes('ВЕРСИЯ 0.6.0'), 'версия пакета в меню');
+assert(menuHtml.includes('ВЕРСИЯ 0.6.1'), 'версия пакета в меню');
 
 /* --- База, отряд, настройки, рейд --- */
 for (const tab of ['base', 'squad', 'save', 'raid']) {
@@ -131,6 +135,51 @@ assert(S.res.credits < creditsBeforeRepair, 'починка списывает �
 Game.action('perk', { dataset: { index: '0', perk: 'marksman' } });
 assert(soldier.perks.includes('marksman'), 'перк выбран из карточки');
 soldier.xp = 0; soldier.perks = []; soldier.gear = { weapon: null, armor: null, gadget: null };
+
+/* --- 0.6.1: стакание одинаковых предметов в списке снаряжения --- */
+const plateA = State.addItem(S, 'armor_plate');
+const plateB = State.addItem(S, 'armor_plate');
+plateB.durability = plateA.durability - 0.4; // «мантисса»: 9.6 → 10
+context.smoke.open('squad');
+html = nodes['#app'].innerHTML;
+assert(html.includes('(×2)'), 'одинаковые бронепластины стакаются: ' + (html.match(/[^>]*\(×2\)/) || [''])[0]);
+Game.equip(0, 'armor', plateA.id);
+context.smoke.open('squad');
+html = nodes['#app'].innerHTML;
+assert(html.includes('(×2)'), 'после экипировки одной из двух счётчик сохраняется');
+assert(new RegExp('value="' + plateA.id + '" selected').test(html), 'экипированный предмет отмечен в стаке');
+soldier.gear = { weapon: null, armor: null, gadget: null };
+
+/* --- 0.6.1: авто-выбор в диалогах события и сюжета --- */
+S.settings = { speed: 1 };
+context.smoke.event('container');
+assert(nodes['#app'].innerHTML.includes('data-action="room-open"'), 'диалог события открыт с кнопками');
+assert(nodes['#app'].innerHTML.includes('Автовыбор через 15 с'), 'на ×1 таймер 15 с');
+assert.equal(context.smoke.profile().raid.overlayRemainingMs, 15000);
+context.smoke.stepOverlay(14000);
+assert.equal(context.smoke.uiState().overlay, 'event', 'до истечения таймера диалог открыт');
+context.smoke.stepOverlay(1000);
+assert.equal(context.smoke.uiState().overlay, '', 'по таймеру событие разрешено автоматически');
+// Пауза блокирует отсчёт
+context.smoke.event('radio');
+context.smoke.profile().raid.speed = 2;
+context.smoke.profile().raid.overlayRemainingMs = 5000;
+context.smoke.pause(true);
+context.smoke.stepOverlay(2000);
+assert.equal(context.smoke.profile().raid.overlayRemainingMs, 5000, 'на паузе отсчёт не идёт');
+assert.equal(context.smoke.uiState().overlay, 'event', 'диалог остаётся открытым на паузе');
+context.smoke.pause(false);
+context.smoke.stepOverlay(2000);
+assert.equal(context.smoke.profile().raid.overlayRemainingMs, 3000, 'после снятия паузы отсчёт продолжается');
+// Сюжетная вставка: единственный вариант «Продолжить» уходит по таймеру
+S.settings = { speed: 4 };
+context.smoke.story();
+assert(nodes['#app'].innerHTML.includes('Продолжение через 5 с'), 'на ×2/×4 таймер 5 с');
+assert(nodes['#app'].innerHTML.includes('data-action="story-continue"'), 'кнопка «Продолжить» в сюжете');
+context.smoke.stepOverlay(5000);
+assert.equal(context.smoke.uiState().overlay, '', 'по таймеру сюжет закрывается');
+assert.equal(context.smoke.profile().seenStory.includes('s05'), true, 'сюжет отмечен показанным при авто-продолжении');
+S.settings = { speed: 1 };
 
 /* --- Экран рейда: динамические регионы и каркас --- */
 context.smoke.raid();

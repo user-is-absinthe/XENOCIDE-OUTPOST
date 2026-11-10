@@ -30,7 +30,7 @@ window.State = (() => {
       let key = null, durability = null, id = null;
       if (raw && typeof raw === 'object') {
         key = raw.key && Balance.gear.defs[raw.key] ? raw.key : keyByName(raw.name);
-        if (Number.isFinite(raw.durability)) durability = Math.floor(raw.durability);
+        if (Number.isFinite(raw.durability)) durability = Math.round(raw.durability);
         if (typeof raw.id === 'string' && raw.id && !seen.has(raw.id)) id = raw.id;
       } else if (typeof raw === 'string') key = keyByName(raw);
       if (!key) continue;
@@ -227,7 +227,9 @@ window.State = (() => {
   /* --- Пакет 0.5.0: предметы, экипировка, износ, опыт и перки --- */
   const itemDef = item => (item && Balance.gear.defs[item.key]) || null;
   const itemName = item => { const def = itemDef(item); return def ? def.name : (item && item.name) || 'Предмет'; };
-  const itemUsable = item => { const def = itemDef(item); return !!def && item.durability > 0; };
+  /* Прочность в целых: предметы с одинаковым ключом и целой прочностью считаются идентичными. */
+  const itemDurability = item => (item && Number.isFinite(item.durability)) ? Math.max(0, Math.round(item.durability)) : 0;
+  const itemUsable = item => { const def = itemDef(item); return !!def && itemDurability(item) > 0; };
   const findItem = (profile, id) => (profile.items || []).find(it => it && it.id === id) || null;
 
   /* Кто владеет предметом (для правила «один предмет — один владелец»). */
@@ -259,7 +261,7 @@ window.State = (() => {
     return true;
   }
 
-  const repairCost = item => { const def = itemDef(item); return def ? Math.max(0, def.durability - item.durability) * Balance.gear.repairPerPoint : 0; };
+  const repairCost = item => { const def = itemDef(item); return def ? Math.max(0, def.durability - itemDurability(item)) * Balance.gear.repairPerPoint : 0; };
   function repairItem(profile, itemId) {
     const item = findItem(profile, itemId), def = itemDef(item);
     if (!def) return { ok: false, reason: 'missing' };
@@ -313,5 +315,5 @@ window.State = (() => {
   }
 
   return { KEY, fresh, migrate, load, save, exportJson, importJson, recruit, pick, autoPick, healCost, healRecruit, normalizeStats, emptyGear,
-    normalizeItems, itemDef, itemName, itemUsable, findItem, gearOwner, equip, repairCost, repairItem, addItem, grantXp, perksEarned, pendingPerks, applyPerk };
+    normalizeItems, itemDef, itemName, itemDurability, itemUsable, findItem, gearOwner, equip, repairCost, repairItem, addItem, grantXp, perksEarned, pendingPerks, applyPerk };
 })();

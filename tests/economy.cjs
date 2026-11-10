@@ -525,7 +525,7 @@ assert(GameUI.healthRow('Тест', 90, 100).includes('high'), 'зелёная �
 // Конфиг констант: баланс не трогали, но числа в одном месте
 assert.equal(Balance.buildings.cost, 85);
 assert.equal(Balance.hiring.cost, 20);
-assert.equal(Balance.version, '0.6.0');
+assert.equal(Balance.version, '0.6.1');
 assert.equal(Balance.profileVersion, 3);
 assert.equal(Balance.rewards.extractFlat, 12);
 assert.equal(Balance.routes.risk.reward, 1.5);
@@ -964,4 +964,24 @@ const legacyContracts = State.fresh(); legacyContracts.v = 2; delete legacyContr
 legacyContracts.recruits = [{ id: 1, name: 'L', class: 'heavy', hp: 60, maxHp: 60, atk: 8, armor: 0, gear: null }];
 assert.deepEqual(norm(State.migrate(legacyContracts).contracts), [], 'контракты по умолчанию пусты');
 
-console.log('Economy: миграция v3, лечение, события боя, перенос ранений, статистика, эвакуация и детерминизм, 0.6.0 контент passed');
+/* --- 0.6.1: снаряжение, стакание и целая прочность --- */
+// Прочность округляется до целых: предметы с «мантиссой» не разъезжаются
+assert.equal(State.itemDurability({ key: 'armor_plate', durability: 9.6 }), 10, 'прочность округляется вверх');
+assert.equal(State.itemDurability({ key: 'armor_plate', durability: 9.4 }), 9, 'прочность округляется вниз');
+assert.equal(State.itemDurability(null), 0, 'нет предмета — нулевая прочность');
+assert.equal(State.normalizeItems([{ key: 'armor_plate', durability: 7.6 }])[0].durability, 8, 'нормализация округляет прочность');
+assert.equal(State.itemUsable({ key: 'frag_grenade', durability: 0.4 }), false, 'прочность 0.4 после округления — 0, предмет сломан');
+assert.equal(State.repairCost({ key: 'armor_plate', durability: 9.6 }), 0, 'округлённая до 10 броня починки не требует');
+
+// Снаряжение помнится за бойцом: выбор/снятие из отряда и выживание в рейде
+const gearSave = State.fresh(); gearSave.res.credits = 5000;
+State.recruit(gearSave, false, 'assault'); State.recruit(gearSave, false, 'heavy');
+const savedRifle = State.addItem(gearSave, 'pulse_rifle');
+assert.equal(State.equip(gearSave, 0, 'weapon', savedRifle.id), true);
+State.pick([], gearSave.recruits, 0); State.pick([0], gearSave.recruits, 0); State.autoPick(gearSave.recruits);
+assert.equal(gearSave.recruits[0].gear.weapon, savedRifle.id, 'снаряжение не сбрасывается при постановке/снятии из отряда');
+Battle.deploy(gearSave, [0]); Battle.finish(gearSave, true, { outcome: 'evac' });
+assert.equal(gearSave.recruits[0].gear.weapon, savedRifle.id, 'снаряжение помнится у выжившего после рейда');
+assert.equal(State.itemDurability(State.findItem(gearSave, savedRifle.id)), 9, 'износ рейда даёт целую прочность');
+
+console.log('Economy: миграция v3, лечение, события боя, перенос ранений, статистика, эвакуация и детерминизм, 0.6.1 контент passed');

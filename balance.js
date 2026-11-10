@@ -3,7 +3,7 @@
    чтобы вернуться к тюнингу позже по запросу. Чистый модуль, без DOM. */
 window.Balance = (() => {
   const b = {
-    version: '0.6.0',
+    version: '0.6.1',
     profileVersion: 3,
     buildings: { cost: 85 },
     hiring: {

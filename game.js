@@ -82,8 +82,13 @@
   function restartTimer() { clearInterval(timer); timer = S.raid ? setInterval(tick, Balance.raid.tickMs / S.raid.speed) : null; }
 
   function changeSpeed(value) {
+    const previous = S.raid ? Automation.validSpeed(S.raid.speed) : null;
     S.settings = { speed: Automation.validSpeed(value) };
-    if (S.raid) { Automation.changeSpeed(S.raid, S.settings.speed); restartTimer(); }
+    if (S.raid) {
+      Automation.changeSpeed(S.raid, S.settings.speed);
+      if (Number.isFinite(S.raid.overlayRemainingMs)) S.raid.overlayRemainingMs = Automation.duration(S.settings.speed) * S.raid.overlayRemainingMs / Automation.duration(previous);
+      restartTimer();
+    }
     save(); render();
   }
   function cycleSpeed() { const speed = Automation.validSpeed(S.settings?.speed); changeSpeed(speed === 1 ? 2 : speed === 2 ? 4 : 1); }
@@ -98,10 +103,38 @@
     }
   }
 
+  /* Авто-выбор в диалогах события и сюжета (п. 4): 15 с на ×1, 5 с на ×2/×4,
+     затем случайный вариант (для сюжета — «Продолжить»). */
+  const overlayActions = () => overlay === 'story' ? ['story-continue'] : Screens.roomOptions(S.raid && S.raid.roomEvent && S.raid.roomEvent.kind).map(code => 'room-' + code);
+  function armOverlayTimer() { if (S.raid) S.raid.overlayRemainingMs = Automation.duration(Automation.validSpeed(S.settings && S.settings.speed)); }
+  function clearOverlayTimer() { if (S.raid) { delete S.raid.overlayRemainingMs; delete S.raid.overlayDurationMs; } }
+  function stepOverlay(ms) {
+    if (!(screen === 'game' && tab === 'raid') || paused || dialog || (typeof document !== 'undefined' && document.hidden)) return;
+    if (overlay !== 'story' && overlay !== 'event') return;
+    const r = S.raid;
+    if (!r) return;
+    const options = overlayActions();
+    if (!options.length) return;
+    const duration = Automation.duration(Automation.validSpeed(S.settings && S.settings.speed));
+    if (!Number.isFinite(r.overlayRemainingMs)) r.overlayRemainingMs = duration;
+    r.overlayDurationMs = duration;
+    const before = Math.ceil(r.overlayRemainingMs / 1000);
+    if (ms > 0) r.overlayRemainingMs = Math.max(0, r.overlayRemainingMs - ms);
+    const after = Math.ceil(r.overlayRemainingMs / 1000);
+    if (before !== after) {
+      const label = el('#overlay-countdown');
+      if (label) label.textContent = Screens.overlayMessage(r, after);
+    }
+    if (r.overlayRemainingMs === 0) {
+      clearOverlayTimer();
+      action(options[Math.floor(Math.random() * options.length)]);
+    }
+  }
+
   function chooseRoute(key) {
     if (!Battle.chooseRoute(S, key)) return false;
     Arena.reset();
-    overlay = '';
+    overlay = ''; clearOverlayTimer();
     save(); render();
     return true;
   }
@@ -110,6 +143,7 @@
     clearInterval(timer); timer = null;
     Arena.reset();
     selected = []; paused = true; overlay = ok ? 'win' : 'dead'; dialog = null; screen = 'result';
+    clearOverlayTimer();
     settleContracts();
     save(); render();
   }
@@ -126,18 +160,18 @@
   function resolveRoom(choice) {
     const res = Battle.roomChoice(S, choice);
     if (!res.ok) { render(); return; }
-    overlay = '';
+    overlay = ''; clearOverlayTimer();
     if (res.events.length) Arena.emit(res.events, Balance.raid.fxSpan, false);
-    save(); refreshRaid();
+    save(); render();
   }
 
   function tick() {
     const res = Battle.tick(S, uiState());
     if (res.status === 'idle') return;
-    if (res.status === 'event') { overlay = 'event'; save(); render(); return; }
+    if (res.status === 'event') { overlay = 'event'; armOverlayTimer(); save(); render(); return; }
     if (res.status === 'checkpoint') {
       const story = Story.pending(S, S.raid.depth);
-      if (story) { S.raid.story = story; overlay = 'story'; }
+      if (story) { S.raid.story = story; overlay = 'story'; armOverlayTimer(); }
       else { Automation.ensure(S.raid); overlay = 'room'; }
       save(); render(); return;
     }
@@ -177,6 +211,8 @@
     if (S.raid.story) overlay = 'story';
     else if (S.raid.roomEvent) overlay = 'event';
     else if (S.raid.cleared && S.raid.depth % Balance.raid.checkpointEvery === 0) overlay = 'room';
+    if (overlay === 'story' || overlay === 'event') { if (!Number.isFinite(S.raid.overlayRemainingMs)) armOverlayTimer(); }
+    else clearOverlayTimer();
     Automation.ensure(S.raid);
     Arena.reset();
     restartTimer(); render();
@@ -224,9 +260,9 @@
     if (!r) return;
     if (r.depth % Balance.raid.checkpointEvery === 0) {
       const story = Story.pending(S, r.depth); // веха глубины: сначала сюжетная вставка
-      if (story) { r.story = story; overlay = 'story'; save(); render(); return; }
+      if (story) { r.story = story; overlay = 'story'; armOverlayTimer(); save(); render(); return; }
       overlay = 'room'; Automation.ensure(r); save(); render();
-    } else if (r.roomEvent) { overlay = 'event'; save(); render(); }
+    } else if (r.roomEvent) { overlay = 'event'; armOverlayTimer(); save(); render(); }
     else { save(); refreshRaid(); }
   }
 
@@ -351,6 +387,7 @@
       case 'story-continue': {
         if (S.raid && S.raid.story) { Story.mark(S, S.raid.story.id); S.raid.story = null; }
         overlay = (S.raid && S.raid.cleared && S.raid.depth % Balance.raid.checkpointEvery === 0) ? 'room' : '';
+        clearOverlayTimer();
         if (overlay === 'room') Automation.ensure(S.raid);
         save(); render(); break;
       }
@@ -406,6 +443,7 @@
     const elapsed = Math.max(0, Math.min(250, now - lastFrame)), dt = Math.min(0.05, elapsed / 1000);
     lastFrame = now;
     stepCheckpoint(elapsed);
+    stepOverlay(elapsed);
     if (screen === 'menu') {
       const canvas = el('#menu-demo');
       if (canvas) { if (!reduced) menuTime += dt; Arena.demo(canvas, menuTime, reduced); }

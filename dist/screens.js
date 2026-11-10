@@ -12,6 +12,21 @@ window.Screens = (() => {
 
   const SLOT_NAMES = { weapon: 'Оружие', armor: 'Броня', gadget: 'Гаджет' };
 
+  /* События с выбором в комнате (п. 3.5): единый источник вариантов для экрана и авто-выбора. */
+  const ROOM_EVENTS = {
+    container: { title: 'ЗАПЕЧАТАННЫЙ КОНТЕЙНЕР', body: 'В переборке застрял армейский контейнер с целыми пломбами. За ним может ждать снаряжение — или то, что его охраняет.', options: [['open', 'Вскрыть контейнер'], ['pass', 'Пройти мимо']] },
+    radio: { title: 'РАДИОСТАНЦИЯ', body: 'Уцелевший ретранслятор ещё ловит позывные КОРПУСА ВНЕШНЕЙ ОБОРОНЫ. Можно запросить поддержку или не выдавать позицию.', options: [['call', 'Вызвать поддержку (+аптечка)'], ['silent', 'Сохранять молчание']] },
+    tunnel: { title: 'ОБХОДНОЙ ТОННЕЛЬ', body: 'В стене открыт технический тоннель: можно проскочить следующий сектор, но без добычи и без зачистки.', options: [['go', 'Пройти тоннелем (пропустить сектор)'], ['main', 'Держаться основного пути']] }
+  };
+  const roomOptions = kind => (ROOM_EVENTS[kind] ? ROOM_EVENTS[kind].options.map(o => o[0]) : []);
+
+  /* Отсчёт авто-выбора диалогового окна (п. 3.5): 15 с на ×1, 5 с на ×2/×4. */
+  const overlaySeconds = (s, r) => {
+    const ms = Number.isFinite(r && r.overlayRemainingMs) ? r.overlayRemainingMs : Automation.duration(Automation.validSpeed(s.settings && s.settings.speed));
+    return Math.max(0, Math.ceil(ms / 1000));
+  };
+  const overlayMessage = (r, seconds) => (r && r.story ? 'Продолжение через ' : 'Автовыбор через ') + seconds + ' с';
+
   /* Строка-описание предмета для выпадающего списка снаряжения. */
   function itemLabel(item) {
     const def = State.itemDef(item);
@@ -36,18 +51,32 @@ window.Screens = (() => {
     return `<div class="xp-line"><span class="xp-rank">Ур. ${p.level} · ${Progression.ranks[p.level - 1]}</span><div class="xp-track" role="img" aria-label="Опыт ${label}"><span style="width:${Math.round(p.ratio * 100)}%"></span></div><span class="xp-value">${label}</span></div>`;
   }
 
-  /* Блок «Снаряжение»: три слота-списка и починка изношенного. */
+  /* Блок «Снаряжение»: три слота-списка и починка изношенного.
+     Одинаковые предметы (один ключ и одинаковая целая прочность) «стакаются»
+     в одну строку с числом штук: «… · 10/10 (×5)». */
   function gearBlock(s, member, index, deployed) {
     const items = s.items || [];
     const otherOwner = id => { const o = State.gearOwner(s, id); return o && o.recruit !== member ? o.recruit.name : null; };
     const slots = ['weapon', 'armor', 'gadget'].map(slot => {
       const equipped = member.gear && member.gear[slot];
-      const opts = items.filter(it => (State.itemDef(it) || {}).type === slot).map(it => {
+      const groups = [], byKey = new Map();
+      for (const it of items) {
         const def = State.itemDef(it);
-        if (def.classReq && def.classReq !== member.class) return '';
-        const owner = otherOwner(it.id);
-        const label = itemLabel(it) + ' · ' + it.durability + '/' + def.durability + (it.durability === 0 ? ' · сломан' : '') + (owner ? ' (у ' + owner + ')' : '');
-        return `<option value="${it.id}" ${equipped === it.id ? 'selected' : ''}>${h(label)}</option>`;
+        if (!def || def.type !== slot) continue;
+        if (def.classReq && def.classReq !== member.class) continue;
+        const dur = State.itemDurability(it);
+        const groupKey = it.key + '@' + dur;
+        let group = byKey.get(groupKey);
+        if (!group) { group = { def, dur, items: [] }; byKey.set(groupKey, group); groups.push(group); }
+        group.items.push(it);
+      }
+      const opts = groups.map(group => {
+        const selected = group.items.some(it => it.id === equipped);
+        const rep = selected ? group.items.find(it => it.id === equipped) : group.items[0];
+        const owner = otherOwner(rep.id);
+        const count = group.items.length > 1 ? ' (×' + group.items.length + ')' : '';
+        const label = itemLabel(rep) + ' · ' + group.dur + '/' + group.def.durability + (group.dur === 0 ? ' · сломан' : '') + count + (owner ? ' (у ' + owner + ')' : '');
+        return `<option value="${rep.id}" ${selected ? 'selected' : ''}>${h(label)}</option>`;
       }).join('');
       const cur = equipped ? State.findItem(s, equipped) : null;
       const cost = cur ? State.repairCost(cur) : 0;
@@ -90,23 +119,19 @@ window.Screens = (() => {
   function roomEventHtml(s, ui) {
     const r = s.raid;
     if (!r || !r.roomEvent) return '';
-    const kind = r.roomEvent.kind;
-    const specs = {
-      container: { title: 'ЗАПЕЧАТАННЫЙ КОНТЕЙНЕР', body: 'В переборке застрял армейский контейнер с целыми пломбами. За ним может ждать снаряжение — или то, что его охраняет.', options: [['open', 'Вскрыть контейнер'], ['pass', 'Пройти мимо']] },
-      radio: { title: 'РАДИОСТАНЦИЯ', body: 'Уцелевший ретранслятор ещё ловит позывные КОРПУСА ВНЕШНЕЙ ОБОРОНЫ. Можно запросить поддержку или не выдавать позицию.', options: [['call', 'Вызвать поддержку (+аптечка)'], ['silent', 'Сохранять молчание']] },
-      tunnel: { title: 'ОБХОДНОЙ ТОННЕЛЬ', body: 'В стене открыт технический тоннель: можно проскочить следующий сектор, но без добычи и без зачистки.', options: [['go', 'Пройти тоннелем (пропустить сектор)'], ['main', 'Держаться основного пути']] }
-    };
-    const spec = specs[kind];
+    const spec = ROOM_EVENTS[r.roomEvent.kind];
     if (!spec) return '';
     const buttons = spec.options.map(([code, label]) => `<button data-action="room-${code}">${h(label)}</button>`).join('');
-    return `<div class="overlay dialog-overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>СЕКТОР ${r.depth} · РЕШЕНИЕ КОМАНДИРА</small><h2 id="dialog-title">${spec.title}</h2><p>${spec.body}</p><div class="actions">${buttons}</div></div></div>`;
+    const countdown = `<p class="muted overlay-countdown" id="overlay-countdown" role="status">${overlayMessage(r, overlaySeconds(s, r))}</p>`;
+    return `<div class="overlay dialog-overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>СЕКТОР ${r.depth} · РЕШЕНИЕ КОМАНДИРА</small><h2 id="dialog-title">${spec.title}</h2><p>${spec.body}</p>${countdown}<div class="actions">${buttons}</div></div></div>`;
   }
 
   /* Диалог сюжетной вставки по вехе глубины (п. 3.2). */
   function storyHtml(s) {
     const r = s.raid, entry = r && r.story;
     if (!entry) return '';
-    return `<div class="overlay dialog-overlay"><div class="dialog story-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>ЗАПИСЬ ПОСТА «КОВЧЕГ»</small><h2 id="dialog-title">${h(entry.title)}</h2><p>${h(entry.text)}</p><div class="actions"><button class="primary" data-action="story-continue">Продолжить →</button></div></div></div>`;
+    const countdown = `<p class="muted overlay-countdown" id="overlay-countdown" role="status">${overlayMessage(r, overlaySeconds(s, r))}</p>`;
+    return `<div class="overlay dialog-overlay"><div class="dialog story-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>ЗАПИСЬ ПОСТА «КОВЧЕГ»</small><h2 id="dialog-title">${h(entry.title)}</h2><p>${h(entry.text)}</p>${countdown}<div class="actions"><button class="primary" data-action="story-continue">Продолжить →</button></div></div></div>`;
   }
 
   function menu(s, ui) {
@@ -327,6 +352,7 @@ window.Screens = (() => {
   return {
     h, cash, classes, classHelp, buildingNames, hpTier, SLOT_NAMES, itemLabel, xpTrack, gearBlock, perkPicker, raidActionsHtml,
     modifierHtml, contractsHtml, roomEventHtml, storyHtml, contractsBlock,
+    ROOM_EVENTS, roomOptions, overlayMessage, overlaySeconds,
     menu, base, squad, raid, save, result, stats, dialog,
     hudHtml, routeTrackHtml, statusHtml, eventHtml, logHtml, kitsHtml,
     preparation, autoMessage, automation, drawStats, drawBars
