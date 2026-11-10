@@ -10,6 +10,37 @@ window.Battle = (() => {
   const routeInfo = r => Object.prototype.hasOwnProperty.call(Balance.routes, r.route) ? Balance.routes[r.route] : Balance.routes.normal;
   const foeName = e => (e.elite ? 'Элитный · ' : '') + (enemies[e.type] || 'Неизвестный');
 
+  /* --- Пакет 0.6.0: модификаторы комнат, механики врагов и боссов --- */
+  const M = Balance.modifiers, ROOM = Balance.roomEvents;
+  const modOf = r => (r && r.modifier && M && M.list[r.modifier]) ? M.list[r.modifier] : null;
+  const healMul = r => { const m = modOf(r); return m && m.healMul != null ? m.healMul : 1; };
+  const enemyMul = r => { const m = modOf(r); return m && m.enemyMul != null ? m.enemyMul : 1; };
+  const rewardMul = r => { const m = modOf(r); return m && m.rewardMul != null ? m.rewardMul : 1; };
+
+  /* Враги-подкрепления (Личинки Матки/Узла) — детальны без RNG: не сдвигают поток seed. */
+  function freshFoe(r, type) {
+    const route = routeInfo(r);
+    const hp = Math.round((type === E.bossType ? E.bossHp : E.hpFlat + type * E.hpPerType) * (1 + r.depth * E.depthScale) * route.hp);
+    return { type, elite: false, hp, maxHp: hp, attackFactor: route.attack, rewardFactor: route.reward };
+  }
+  const liveLarvae = r => (r.foes || []).filter(e => e.hp > 0 && e.type === 0).length;
+
+  /* Одиночный элитный враг (событие «Запечатанный контейнер»). */
+  function eliteFoe(r) {
+    const route = routeInfo(r);
+    const type = Math.floor(roll(r) * E.typeCount);
+    const hp = Math.round((E.hpFlat + type * E.hpPerType) * (1 + r.depth * E.depthScale) * route.hp * E.eliteHp);
+    return { type, elite: true, hp, maxHp: hp, attackFactor: route.attack * E.eliteAttack, rewardFactor: route.reward * E.eliteReward };
+  }
+
+  /* Модификатор комнаты (детерминирован seed): с 3-го сектора, не шлюз, шанс 20%. */
+  function rollModifier(r) {
+    r.modifier = null;
+    if (!M || !Number.isFinite(r.depth) || r.depth < M.startDepth || r.depth % RAID.checkpointEvery === 0) return null;
+    if (roll(r) < M.chance) { const keys = Object.keys(M.list); r.modifier = keys[Math.floor(roll(r) * keys.length)]; }
+    return r.modifier;
+  }
+
   function createEncounter(r) {
     const route = routeInfo(r);
     return Array.from({ length: r.depth % RAID.checkpointEvery === 0 ? 1 : Math.min(E.maxCount, E.minCount + Math.floor(r.depth / E.countPerDepth)) }, () => {
@@ -22,9 +53,10 @@ window.Battle = (() => {
 
   /* Лечение в рейде — только до maxHp бойца. */
   function healCrew(r, amount) {
+    const scaled = Math.max(0, Math.round(amount * healMul(r)));
     let restored = 0;
     r.crew.filter(c => c.hp > 0).forEach(c => {
-      const gain = Math.max(0, Math.min(amount, (c.maxHp || c.hp) - c.hp));
+      const gain = Math.max(0, Math.min(scaled, (c.maxHp || c.hp) - c.hp));
       c.hp += gain; restored += gain;
     });
     return restored;
@@ -98,6 +130,7 @@ window.Battle = (() => {
       case 'sectorClear': return e.checkpoint ? '' : 'Сектор зачищен. Отряд движется к следующему шлюзу.';
       case 'bossPhase': return e.text || 'Фаза босса изменена.';
       case 'grenade': return 'Граната: −' + e.amount + ' HP всем противникам.';
+      case 'radiation': return 'Радиация: −' + e.amount + ' HP всем живым бойцам.';
       case 'save': return e.text || ((e.target && e.target.name || 'Боец') + ': страховой маяк компенсировал смертельный удар, боец держится на 1 HP.');
       case 'gear': return 'Найден предмет: ' + e.name + '.';
       case 'retreat': return e.text || 'Отступление.';
@@ -137,6 +170,12 @@ window.Battle = (() => {
       r.loot += amount; r.lootCache = (r.lootCache || 0) + amount;
       list.push({ t: 'loot', amount, source: 'cache' });
       let text = 'Отряд забрал ' + amount + ' кредитов в груз.';
+      if (r.pendingFindBonus) { // победа над элитой из «Запечатанного контейнера»: +50% к находке
+        const bonus = Math.round(amount * ROOM.containerBonus);
+        r.loot += bonus; r.lootCache = (r.lootCache || 0) + bonus;
+        list.push({ t: 'loot', amount: bonus, source: 'container' });
+        text += ' Контейнер: +' + bonus + ' кредитов.';
+      }
       if (roll(r) < L.cacheItemChance) text += ' В тайнике найден предмет: ' + dropGear(S, r, list) + '.';
       r.sectorEvent = { kind: 'cache', title: 'Обнаружен тайник', text };
     } else if (chance < cacheChance + L.medicalChance + find) {
@@ -152,6 +191,15 @@ window.Battle = (() => {
     }
     list.push({ t: 'sectorClear', depth: r.depth, checkpoint });
     if (checkpoint) list.push({ t: 'heal', source: 'medpost', amount: healCrew(r, Progression.medbay(S.buildings.medbay).rest) });
+    r.pendingFindBonus = false;
+    // Событие с выбором (п. 3.5): не более одного за сектор, только обычные сектора.
+    if (!checkpoint && !r.roomEventSeen) {
+      r.roomEventSeen = true;
+      if (roll(r) < ROOM.chance) {
+        const kinds = ((r.depth + 1) % RAID.checkpointEvery === 0) ? ['container', 'radio'] : ['container', 'radio', 'tunnel'];
+        r.roomEvent = { kind: kinds[Math.floor(roll(r) * kinds.length)] };
+      }
+    }
     S.deepest = Math.max(S.deepest, r.depth);
     if (own) pushLog(r, list);
     return list;
@@ -168,6 +216,7 @@ window.Battle = (() => {
     const kit = Preparation.useKit(r);
     if (kit) events.push({ t: 'kit', target: kit.unit || { name: kit.name }, amount: kit.healed, left: r.kits });
     if (!r.foes) { r.foes = createEncounter(r); events.push({ t: 'spawn', names: r.foes.map(foeName), source: 'encounter', foes: r.foes }); }
+    const phased = []; // Матки, перешедшие в фазу на 50% HP в этот ход
     // Ход отряда: сохранённый порядок обращений к RNG.
     for (const c of alive) {
       const targets = r.foes.filter(e => e.hp > 0);
@@ -175,7 +224,7 @@ window.Battle = (() => {
       c.maxHp = c.maxHp || c.hp;
       if (c.class === 'medic' && r.turn % C.medicEvery === 0 && alive.some(p => p.hp / (p.maxHp || p.hp) < C.medicThreshold)) {
         const patient = alive.reduce((a, b) => a.hp / (a.maxHp || a.hp) < b.hp / (b.maxHp || b.hp) ? a : b);
-        const heal = Math.min(Progression.medbay(S.buildings.medbay).heal + (c.medicBonus || 0), (patient.maxHp || patient.hp) - patient.hp);
+        const heal = Math.min(Math.round((Progression.medbay(S.buildings.medbay).heal + (c.medicBonus || 0)) * healMul(r)), (patient.maxHp || patient.hp) - patient.hp);
         patient.hp += heal;
         events.push({ t: 'heal', by: c, target: patient, amount: heal, source: 'medic' });
         continue;
@@ -190,8 +239,9 @@ window.Battle = (() => {
       if (c.class === 'engineer') damage += C.engineerFlat;
       e.hp = Math.max(0, e.hp - damage);
       events.push({ t: 'hit', by: c, target: e, side: 'foe', dmg: damage });
+      if (e.type === E.bossType && !e.phased && e.hp > 0 && e.hp <= e.maxHp * C.bossPhaseRatio) { e.phased = true; phased.push(e); }
       if (e.hp === 0) {
-        const reward = Math.round((e.type === E.bossType ? R.bossFlat : R.killFlat + r.depth * R.killPerDepth) * Progression.command(S.buildings.command).reward * (e.rewardFactor || 1));
+        const reward = Math.round((e.type === E.bossType ? R.bossFlat : R.killFlat + r.depth * R.killPerDepth) * Progression.command(S.buildings.command).reward * (e.rewardFactor || 1) * rewardMul(r));
         r.loot = (r.loot || 0) + reward; r.lootBattle = (r.lootBattle || 0) + reward;
         r.kills = (r.kills || 0) + 1;
         if (S.stats && S.stats.total) S.stats.total.kills++;
@@ -200,11 +250,23 @@ window.Battle = (() => {
       }
     }
     // Ход противников.
+    // «Узел гнезда»: каждые 3 хода спавнит Личинку (не более 3 живых одновременно).
+    if (r.turn % C.nestEvery === 0) {
+      for (const e of r.foes.filter(e => e.hp > 0 && e.type === C.nestType)) {
+        if (liveLarvae(r) >= C.nestMaxLarvae) break;
+        const larva = freshFoe(r, 0);
+        r.foes.push(larva);
+        events.push({ t: 'spawn', source: 'nest', names: [foeName(larva)], foes: [larva] });
+      }
+    }
     for (const e of r.foes.filter(e => e.hp > 0)) {
       alive = r.crew.filter(c => c.hp > 0);
       if (!alive.length) break;
-      const target = alive.find(c => c.class === 'heavy') || alive[Math.floor(roll(r) * alive.length)];
-      const damage = Math.max(C.minDamage, Math.round((e.type === E.bossType ? C.bossAttack : C.enemyAttackFlat + e.type) * (1 + r.depth * C.enemyDepthScale) * (e.attackFactor || 1)) - target.armor - (target.class === 'heavy' ? C.heavyGuard : 0));
+      // «Плевальщик»: каждый 3-й ход бьёт самого раненого бойца, минуя «тяжёлого».
+      const target = (e.type === C.spitterType && r.turn % C.spitterEvery === 0)
+        ? alive.reduce((a, b) => a.hp / (a.maxHp || a.hp) < b.hp / (b.maxHp || b.hp) ? a : b)
+        : alive.find(c => c.class === 'heavy') || alive[Math.floor(roll(r) * alive.length)];
+      const damage = Math.max(C.minDamage, Math.round((e.type === E.bossType ? C.bossAttack : C.enemyAttackFlat + e.type) * (1 + r.depth * C.enemyDepthScale) * (e.attackFactor || 1) * enemyMul(r)) - target.armor - (target.class === 'heavy' ? C.heavyGuard : 0));
       target.hp = Math.max(0, target.hp - damage);
       events.push({ t: 'hit', by: e, target, side: 'crew', dmg: damage });
       if (target.hp === 0) {
@@ -215,6 +277,18 @@ window.Battle = (() => {
           events.push({ t: 'save', target });
         } else events.push({ t: 'kill', by: e, target, side: 'crew' });
       }
+    }
+    // «Матка» на 50% HP призывает Личинок (событие фазы босса).
+    for (const boss of phased) {
+      const names = [];
+      for (let i = 0; i < C.bossLarvae; i++) { const larva = freshFoe(r, 0); r.foes.push(larva); names.push(foeName(larva)); }
+      events.push({ t: 'bossPhase', text: 'Матка в агонии: на помощь выходят ' + names.join(', ') + '.', names });
+    }
+    // «Радиация»: в конце хода все живые бойцы теряют 2 HP (не ниже 1).
+    const rad = modOf(r) && modOf(r).damage;
+    if (rad) {
+      const living = r.crew.filter(c => c.hp > 0);
+      if (living.length) { for (const c of living) c.hp = Math.max(1, c.hp - rad); events.push({ t: 'radiation', amount: rad }); }
     }
     let status = 'fight';
     if (!r.crew.some(c => c.hp > 0)) { events.push({ t: 'wipe' }); status = 'defeat'; }
@@ -228,6 +302,7 @@ window.Battle = (() => {
     if (!S.raid || ui.paused || ui.overlay || ui.tab !== 'raid' || ui.screen !== 'game') return { events: [], status: 'idle' };
     const r = S.raid;
     if (r.cleared) {
+      if (r.roomEvent) return { events: [], status: 'event' };
       if (r.depth % RAID.checkpointEvery === 0) return { events: [], status: 'checkpoint' };
       r.transitionTicks = (r.transitionTicks ?? RAID.transitionTicks) - 1;
       if (r.transitionTicks <= 0) { advance(S); return { events: [], status: 'advance' }; }
@@ -242,6 +317,8 @@ window.Battle = (() => {
     Automation.reset(r);
     delete r.foes;
     r.cleared = false; r.depth++; r.room = 0; r.kills = 0; r.transitionTicks = 0; r.sectorEvent = null; r.grenadeUsed = false;
+    r.roomEvent = null; r.roomEventSeen = false; r.pendingFindBonus = false;
+    rollModifier(r); // новый сектор — новый модификатор (детерминирован seed)
     return true;
   }
 
@@ -266,12 +343,14 @@ window.Battle = (() => {
       findBonus: snapshots.reduce((sum, s) => sum + s.snap.findBonus, 0),
       kitBonus: snapshots.reduce((sum, s) => sum + s.snap.kitBonus, 0),
       grenadeUsed: false, covered: false,
+      modifier: null, roomEvent: null, roomEventSeen: false, pendingFindBonus: false,
       loot: 0, lootBattle: 0, lootCache: 0,
       speed: Automation.validSpeed(S.settings.speed),
       seed: Date.now() >>> 0,
       log: ['Высадка подтверждена. Автопилот отряда активен.'],
       kills: 0, turn: 0
     };
+    rollModifier(S.raid); // высадка в сектор 1 (модификаторов не будет — глубина < 3)
     return { ok: true, crew: crew.map(x => S.recruits.indexOf(x)) };
   }
 
@@ -378,6 +457,38 @@ window.Battle = (() => {
     return true;
   }
 
+  /* Разрешение события с выбором в комнате (п. 3.5). choice — код варианта. */
+  function roomChoice(S, choice) {
+    const r = S.raid, events = [];
+    if (!r || !r.roomEvent || r.cleared !== true) return { ok: false, events, status: 'idle' };
+    const kind = r.roomEvent.kind;
+    r.roomEvent = null;
+    let status = 'cleared';
+    if (kind === 'container') {
+      if (choice === 'open') {
+        if (roll(r) < ROOM.containerEliteChance) {
+          r.foes = [eliteFoe(r)];
+          r.cleared = false;
+          r.pendingFindBonus = true;
+          events.push({ t: 'spawn', source: 'container', names: [foeName(r.foes[0])], foes: r.foes });
+          status = 'fight';
+        }
+      }
+    } else if (kind === 'radio') {
+      if (choice === 'call' && (r.kits || 0) < (r.kitCapacity || 3)) {
+        r.kits = (r.kits || 0) + 1; r.kitsBought = (r.kitsBought || 0) + 1;
+      }
+    } else if (kind === 'tunnel' && choice === 'go') {
+      // Пропуск следующего сектора: глубина +1 сразу, без наград за пропущенный сектор.
+      r.depth += 1; r.cleared = true; r.modifier = null; r.kills = 0;
+      r.transitionTicks = RAID.transitionTicks; r.sectorEvent = null;
+      delete r.foes;
+      status = 'transition';
+    }
+    if (events.length) pushLog(r, events);
+    return { ok: true, events, status };
+  }
+
   /* Граната: один раз за бой, 15 урона всем живым врагам, расходуется. */
   function grenade(S) {
     const r = S.raid, events = [];
@@ -448,6 +559,6 @@ window.Battle = (() => {
   return {
     enemies, roll, routeInfo, foeName, createEncounter, healCrew, formatEvent, pushLog,
     clearSector, turn, tick, advance, deploy, finish, canExtract, extract, chooseRoute,
-    stepCheckpoint, bucketKey, statsBucket, crewSnapshot, grenade, retreat, cover, canGrenade, canCover, dropGear
+    stepCheckpoint, bucketKey, statsBucket, crewSnapshot, grenade, retreat, cover, canGrenade, canCover, dropGear, roomChoice, rollModifier
   };
 })();

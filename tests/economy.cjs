@@ -13,9 +13,9 @@ const localStorage = {
 const context = { console, localStorage };
 context.window = context;
 vm.createContext(context);
-for (const file of ['balance.js', 'progression.js', 'automation.js', 'interface.js', 'preparation.js', 'state.js', 'battle.js'])
+for (const file of ['balance.js', 'progression.js', 'automation.js', 'interface.js', 'preparation.js', 'story.js', 'contracts.js', 'state.js', 'battle.js'])
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), context);
-const { Balance, State, Battle, Preparation, Automation, Progression, GameUI } = context;
+const { Balance, State, Battle, Preparation, Automation, Progression, GameUI, Contracts, Story } = context;
 
 const ui = (over = {}) => Object.assign({ screen: 'game', tab: 'raid', paused: false, overlay: '', hidden: false }, over);
 const clone = x => JSON.parse(JSON.stringify(x));
@@ -525,7 +525,7 @@ assert(GameUI.healthRow('Тест', 90, 100).includes('high'), 'зелёная �
 // Конфиг констант: баланс не трогали, но числа в одном месте
 assert.equal(Balance.buildings.cost, 85);
 assert.equal(Balance.hiring.cost, 20);
-assert.equal(Balance.version, '0.5.0');
+assert.equal(Balance.version, '0.6.0');
 assert.equal(Balance.profileVersion, 3);
 assert.equal(Balance.rewards.extractFlat, 12);
 assert.equal(Balance.routes.risk.reward, 1.5);
@@ -733,6 +733,7 @@ for (let seed = 1; seed <= 10; seed++) {
     const r = profile.raid;
     if (!r) break;
     if (res.status === 'defeat') { Battle.finish(profile, false); break; }
+    if (res.status === 'event') { Battle.roomChoice(profile, 'pass'); continue; }
     if (r.cleared && r.depth % Balance.raid.checkpointEvery === 0 && Battle.canExtract(profile, ui({ overlay: 'room' }))) {
       Battle.extract(profile, ui({ overlay: 'room' })); wins++; break;
     }
@@ -741,4 +742,226 @@ for (let seed = 1; seed <= 10; seed++) {
 }
 assert(wins >= 5, 'сбалансированный отряд доходит до эвакуации: ' + wins + '/10');
 
-console.log('Economy: миграция v3, лечение, события боя, перенос ранений, статистика, эвакуация и детерминизм passed');
+/* --- 0.6.0: модификаторы комнат --- */
+let pass = { depth: 2, seed: 3 };
+assert.equal(Battle.rollModifier(pass), null, 'до глубины 3 модификаторов нет');
+pass = { depth: 5, seed: 3 };
+assert.equal(Battle.rollModifier(pass), null, 'шлюз без модификатора');
+let modCount = 0;
+for (let seed = 1; seed <= 1000; seed++) {
+  const r = { depth: 4, seed: (seed * 2654435761) >>> 0 };
+  const again = { depth: 4, seed: (seed * 2654435761) >>> 0 };
+  Battle.rollModifier(r); Battle.rollModifier(again);
+  assert.equal(r.modifier, again.modifier, 'модификатор детерминирован по seed');
+  if (r.modifier) modCount++;
+}
+assert(modCount > 150 && modCount < 250, 'модификатор ~20%: ' + modCount);
+console.log('Модификаторы на 1000 seed:', modCount);
+
+// «Радиация»: −2 HP в конце хода, не ниже 1
+let rad = State.fresh(); rad.res.credits = 0;
+rad.recruits = [{ id: 1, name: 'R', class: 'assault', hp: 40, maxHp: 40, atk: 1, armor: 0, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }];
+Battle.deploy(rad, [0]); rad.raid.seed = 1; rad.raid.depth = 4; rad.raid.modifier = 'radiation';
+rad.raid.foes = [{ type: 0, hp: 999, maxHp: 999, attackFactor: 0, rewardFactor: 1 }];
+const radTurn = Battle.turn(rad);
+assert(radTurn.events.some(e => e.t === 'radiation' && e.amount === 2), 'радиация эмитит событие');
+const radEnemyDmg = Math.max(Balance.combat.minDamage, Math.round((Balance.combat.enemyAttackFlat + 0) * (1 + 4 * Balance.combat.enemyDepthScale) * 1));
+assert.equal(rad.raid.crew[0].hp, 40 - radEnemyDmg - 2, 'враг −' + radEnemyDmg + ' и радиация −2');
+assert.equal(Battle.formatEvent({ t: 'radiation', amount: 2 }), 'Радиация: −2 HP всем живым бойцам.');
+let radLow = State.fresh(); radLow.res.credits = 0;
+radLow.recruits = [{ id: 1, name: 'R', class: 'assault', hp: radEnemyDmg + 2, maxHp: 40, atk: 1, armor: 0, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }];
+Battle.deploy(radLow, [0]); radLow.raid.seed = 1; radLow.raid.depth = 4; radLow.raid.modifier = 'radiation';
+radLow.raid.foes = [{ type: 0, hp: 999, maxHp: 999, attackFactor: 0, rewardFactor: 1 }];
+Battle.turn(radLow);
+assert.equal(radLow.raid.crew[0].hp, 1, 'радиация не убивает (пол 1 HP)');
+
+// «Споры»: всё лечение −50%
+const spore = State.fresh();
+spore.raid = { depth: 4, modifier: 'spores', crew: [{ hp: 10, maxHp: 90 }], foes: [], loot: 0, log: [] };
+assert.equal(Battle.healCrew(spore.raid, 20), 10, 'споры: лечение вдвое');
+spore.raid.crew[0].hp = 10;
+assert.equal(Battle.healCrew(spore.raid, 20), 10);
+
+// «Агрессивная среда»: враги +15% урона, награды за бой +15%
+let harsh = State.fresh(); harsh.res.credits = 0;
+harsh.recruits = [{ id: 1, name: 'H', class: 'assault', hp: 200, maxHp: 200, atk: 1, armor: 0, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }];
+Battle.deploy(harsh, [0]); harsh.raid.seed = 5; harsh.raid.depth = 4; harsh.raid.modifier = 'harsh';
+harsh.raid.foes = [{ type: 0, hp: 999, maxHp: 999, attackFactor: 1, rewardFactor: 1 }];
+Battle.turn(harsh);
+const harshDmg = 200 - harsh.raid.crew[0].hp;
+assert.equal(harshDmg, Math.max(1, Math.round((Balance.combat.enemyAttackFlat + 0) * (1 + 4 * Balance.combat.enemyDepthScale) * 1 * 1.15)), 'урон врага +15%');
+let harshReward = State.fresh(); harshReward.res.credits = 0;
+harshReward.recruits = [{ id: 1, name: 'H', class: 'assault', hp: 200, maxHp: 200, atk: 400, armor: 0, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }];
+Battle.deploy(harshReward, [0]); harshReward.raid.seed = 5; harshReward.raid.depth = 4; harshReward.raid.modifier = 'harsh';
+harshReward.raid.foes = [{ type: 0, hp: 1, maxHp: 1, attackFactor: 1, rewardFactor: 1 }];
+Battle.turn(harshReward);
+const baseReward = Balance.rewards.killFlat + 4 * Balance.rewards.killPerDepth;
+assert.equal(harshReward.raid.lootBattle, Math.round(baseReward * 1 * 1.15), 'награда за бой +15%');
+
+/* --- 0.6.0: механики врагов и боссов --- */
+// Приказ по умолчанию предпочитает Панцирника (type 3)
+assert.equal(Preparation.target([{ type: 0, hp: 10 }, { type: 3, hp: 10 }], 'front').type, 3, 'Панцирник в приоритете');
+assert.equal(Preparation.target([{ type: 3, hp: 0 }, { type: 0, hp: 10 }], 'front').type, 0, 'мёртвый Панцирник не выбран');
+assert.equal(Preparation.target([{ type: 0, hp: 10 }, { type: 3, hp: 10 }], 'weak').type, 0, 'приказ weak не смотрит на Панцирника');
+
+// Узел гнезда: каждые 3 хода спавнит Личинку (не более 3 живых)
+function nestProfile() {
+  const p = State.fresh(); p.res.credits = 0;
+  p.recruits = [{ id: 1, name: 'N', class: 'heavy', hp: 500, maxHp: 500, atk: 1, armor: 0, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }];
+  Battle.deploy(p, [0]); p.raid.seed = 7; p.raid.depth = 3; p.raid.turn = 2;
+  p.raid.foes = [{ type: 4, hp: 999, maxHp: 999, attackFactor: 1, rewardFactor: 1 }];
+  return p;
+}
+const nest = nestProfile();
+const nestTurn = Battle.turn(nest);
+assert(nestTurn.events.some(e => e.t === 'spawn' && e.source === 'nest'), 'узел спавнит Личинку на 3-м ходу');
+assert.equal(nest.raid.foes.filter(f => f.type === 0 && f.hp > 0).length, 1, 'одна Личинка');
+const nestFull = nestProfile();
+nestFull.raid.foes.push({ type: 0, hp: 10, maxHp: 10 }, { type: 0, hp: 10, maxHp: 10 }, { type: 0, hp: 10, maxHp: 10 });
+const nestFullTurn = Battle.turn(nestFull);
+assert(!nestFullTurn.events.some(e => e.t === 'spawn' && e.source === 'nest'), 'не более 3 живых Личинок одновременно');
+
+// Плевальщик: каждый 3-й ход бьёт самого раненого, минуя «тяжёлого»
+let spit = State.fresh(); spit.res.credits = 0;
+spit.recruits = [
+  { id: 1, name: 'heavy', class: 'heavy', hp: 100, maxHp: 100, atk: 1, armor: 0, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } },
+  { id: 2, name: 'wounded', class: 'assault', hp: 10, maxHp: 100, atk: 1, armor: 0, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }
+];
+Battle.deploy(spit, [0, 1]); spit.raid.seed = 9; spit.raid.depth = 3; spit.raid.turn = 2;
+spit.raid.foes = [{ type: 2, hp: 999, maxHp: 999, attackFactor: 1, rewardFactor: 1 }];
+Battle.turn(spit);
+assert.equal(spit.raid.crew[0].hp, 100, 'тяжёлый не тронут');
+assert(spit.raid.crew[1].hp < 10, 'Плевальщик бьёт самого раненого');
+
+// Матка: фаза на 50% HP призывает 2 Личинок
+let boss = State.fresh(); boss.res.credits = 0;
+boss.recruits = [{ id: 1, name: 'B', class: 'assault', hp: 500, maxHp: 500, atk: 60, armor: 0, xp: 0, perks: [], gear: { weapon: null, armor: null, gadget: null } }];
+Battle.deploy(boss, [0]); boss.raid.seed = 3; boss.raid.depth = 5;
+boss.raid.foes = [{ type: 5, elite: false, hp: 100, maxHp: 200, attackFactor: 1, rewardFactor: 1 }];
+const bossTurn = Battle.turn(boss);
+assert(bossTurn.events.some(e => e.t === 'bossPhase'), 'событие фазы Матки');
+assert.equal(boss.raid.foes.filter(f => f.type === 0).length, 2, 'две Личинки призваны');
+assert(!Battle.turn(boss).events.some(e => e.t === 'bossPhase') || boss.raid.foes.filter(f => f.type === 0).length >= 2, 'фаза не повторяется');
+
+/* --- 0.6.0: события с выбором в комнате --- */
+function roomBase(depth, seed, over) {
+  const o = over || {};
+  return Object.assign({ depth, seed, crew: [{ id: 1, hp: 40, maxHp: 90, deployHp: 90, gear: {} }], foes: [{ hp: 0 }], loot: 0, lootCache: 0, lootBattle: 0, log: [], kits: 0, kitsBought: 0, kitTier: 1, kitPrice: 12, kitHeal: 30, kitCapacity: 3, speed: 1, cleared: !!o.roomEvent, findBonus: 0, kitBonus: 0 }, o);
+}
+let roomCount = 0;
+for (let i = 0; i < 1000; i++) {
+  const p = State.fresh(); p.raid = roomBase(1, (i * 2654435761) >>> 0);
+  Battle.clearSector(p);
+  if (p.raid.roomEvent) roomCount++;
+}
+assert(roomCount > 150 && roomCount < 250, 'событие комнаты ~20%: ' + roomCount);
+console.log('События комнаты на 1000 seed:', roomCount);
+
+// Контейнер: 40% боя с элитой
+let containerTotal = 0, containerElite = 0;
+for (let i = 0; i < 1000; i++) {
+  const p = State.fresh(); p.raid = roomBase(1, (i * 40503) >>> 0, { roomEvent: { kind: 'container' } });
+  const res = Battle.roomChoice(p, 'open');
+  assert.equal(res.ok, true);
+  containerTotal++;
+  if (p.raid.cleared === false) containerElite++;
+}
+assert(containerElite > containerTotal * 0.3 && containerElite < containerTotal * 0.5, 'элита из контейнера ~40%: ' + containerElite + '/' + containerTotal);
+// Проход мимо — ничего
+const passContainer = State.fresh(); passContainer.raid = roomBase(1, 5, { roomEvent: { kind: 'container' } });
+assert.equal(Battle.roomChoice(passContainer, 'pass').ok, true);
+assert.equal(passContainer.raid.roomEvent, null, 'событие снято');
+assert.equal(passContainer.raid.cleared, true);
+
+// Радиостанция: +1 аптечка при наличии места
+const radio = State.fresh(); radio.raid = roomBase(2, 5, { roomEvent: { kind: 'radio' }, kits: 1, kitsBought: 1 });
+Battle.roomChoice(radio, 'call');
+assert.equal(radio.raid.kits, 2, 'радио добавляет аптечку');
+const radioFull = State.fresh(); radioFull.raid = roomBase(2, 5, { roomEvent: { kind: 'radio' }, kits: 3, kitsBought: 3 });
+Battle.roomChoice(radioFull, 'call');
+assert.equal(radioFull.raid.kits, 3, 'при полном запасе аптечка не добавляется');
+const radioSilent = State.fresh(); radioSilent.raid = roomBase(2, 5, { roomEvent: { kind: 'radio' }, kits: 0, kitsBought: 0 });
+Battle.roomChoice(radioSilent, 'silent');
+assert.equal(radioSilent.raid.kits, 0);
+
+// Обходной тоннель: пропуск сектора (глубина +1 сразу, без наград)
+const tunnel = State.fresh(); tunnel.raid = roomBase(7, 5, { roomEvent: { kind: 'tunnel' } });
+assert.equal(Battle.roomChoice(tunnel, 'go').status, 'transition');
+assert.equal(tunnel.raid.depth, 8, 'тоннель: глубина +1');
+assert.equal(tunnel.raid.cleared, true);
+const main = State.fresh(); main.raid = roomBase(7, 5, { roomEvent: { kind: 'tunnel' } });
+Battle.roomChoice(main, 'main');
+assert.equal(main.raid.depth, 7, 'основной путь — без сдвига');
+// Тоннель не предлагается перед шлюзом
+let tunnelGate = 0;
+for (let i = 0; i < 1000; i++) {
+  const p = State.fresh(); p.raid = roomBase(4, (i * 2246822519) >>> 0);
+  Battle.clearSector(p);
+  if (p.raid.roomEvent && p.raid.roomEvent.kind === 'tunnel') tunnelGate++;
+}
+assert.equal(tunnelGate, 0, 'перед шлюзом тоннеля нет');
+
+/* --- 0.6.0: контракты --- */
+let rs = 12345; const rnd = () => { rs = (1664525 * rs + 1013904223) >>> 0; return rs / 4294967296; };
+const cs = State.fresh(); cs.res.credits = 0;
+Contracts.ensure(cs, rnd);
+assert.equal(cs.contracts.length, Balance.contracts.max, 'три активных контракта');
+for (const c of cs.contracts) {
+  assert(['kill', 'depth', 'loot', 'evac'].includes(c.kind));
+  assert(c.target > 0 && Number.isInteger(c.target));
+  assert(c.reward && (c.reward.kind === 'credits' || c.reward.kind === 'item'));
+  if (c.reward.kind === 'credits') assert(c.reward.amount >= Balance.contracts.creditMin && c.reward.amount <= Balance.contracts.creditMax);
+  assert(typeof Contracts.describe(c) === 'string' && Contracts.describe(c).length > 0);
+}
+const kc = cs.contracts[0];
+Object.assign(kc, { kind: 'kill', foeType: 1, target: 2, progress: 0, reward: { kind: 'credits', amount: 100 } });
+Contracts.onEvent(cs, { t: 'kill', side: 'foe', target: { type: 1 } });
+assert.equal(kc.progress, 1);
+Contracts.onEvent(cs, { t: 'kill', side: 'foe', target: { type: 2 } });
+assert.equal(kc.progress, 1, 'чужой тип не считается');
+Contracts.onEvent(cs, { t: 'kill', side: 'crew', target: { type: 1 } });
+assert.equal(kc.progress, 1, 'потери отряда не считаются');
+Contracts.onEvent(cs, { t: 'kill', side: 'foe', target: { type: 1 } });
+assert.equal(kc.progress, 2);
+const doneKill = Contracts.onFinish(cs, { depth: 1, ok: false, loot: { cargo: 0 } });
+assert(doneKill.includes(kc), 'выполненный контракт снят');
+assert(!cs.contracts.includes(kc));
+const creditsBeforeContract = cs.res.credits;
+Contracts.claim(cs, doneKill, rnd);
+assert.equal(cs.res.credits, creditsBeforeContract + 100, 'награда кредитами выдана');
+assert.equal(cs.contracts.length, Balance.contracts.max, 'добор новых контрактов');
+
+const dc = State.fresh();
+dc.contracts = [{ id: 'd', kind: 'depth', target: 10, progress: 0, reward: { kind: 'credits', amount: 50 } }];
+assert.equal(Contracts.onFinish(dc, { depth: 5, ok: false, loot: { cargo: 30 } }).length, 0);
+assert.equal(dc.contracts[0].progress, 5, 'прогресс глубины — максимум за рейд');
+assert.equal(Contracts.onFinish(dc, { depth: 10, ok: false, loot: { cargo: 30 } }).length, 1, 'глубина достигнута');
+const lc = State.fresh();
+lc.contracts = [{ id: 'l', kind: 'loot', target: 100, progress: 0, reward: { kind: 'item' } }];
+Contracts.onFinish(lc, { depth: 3, ok: true, loot: { cargo: 100 } });
+assert.equal(lc.contracts.length, 0, 'контракт на добычу выполнен');
+const ec = State.fresh();
+ec.contracts = [{ id: 'e', kind: 'evac', target: 2, progress: 0, reward: { kind: 'credits', amount: 60 } }];
+assert.equal(Contracts.onFinish(ec, { depth: 5, ok: true, loot: { cargo: 0 } }).length, 0, 'нужны две эвакуации');
+assert.equal(ec.contracts[0].progress, 1);
+const ecDone = Contracts.onFinish(ec, { depth: 5, ok: true, loot: { cargo: 0 } });
+assert.equal(ecDone.length, 1, 'вторая эвакуация выполняет контракт');
+assert(ecDone[0].reward.kind === 'credits');
+
+/* --- 0.6.0: сюжетные вставки --- */
+const story = State.fresh();
+assert.equal(Story.entries.length, 6, 'шесть сюжетных вставок');
+assert.equal(Story.milestones.join(','), '5,10,15,20,25,30');
+assert.equal(Story.at(10).id, 's10');
+assert.equal(Story.at(7), null);
+assert.equal(Story.pending(story, 5).id, 's05');
+Story.mark(story, 's05');
+assert.equal(Story.pending(story, 5), null, 'вставка не повторяется');
+assert.deepEqual(norm(story.seenStory), ['s05']);
+
+// Миграция: contracts добавляется старым сейвам
+const legacyContracts = State.fresh(); legacyContracts.v = 2; delete legacyContracts.contracts;
+legacyContracts.recruits = [{ id: 1, name: 'L', class: 'heavy', hp: 60, maxHp: 60, atk: 8, armor: 0, gear: null }];
+assert.deepEqual(norm(State.migrate(legacyContracts).contracts), [], 'контракты по умолчанию пусты');
+
+console.log('Economy: миграция v3, лечение, события боя, перенос ранений, статистика, эвакуация и детерминизм, 0.6.0 контент passed');

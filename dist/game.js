@@ -110,18 +110,42 @@
     clearInterval(timer); timer = null;
     Arena.reset();
     selected = []; paused = true; overlay = ok ? 'win' : 'dead'; dialog = null; screen = 'result';
+    settleContracts();
     save(); render();
+  }
+
+  /* Контракты (п. 3.1): прогресс по finish(), выдача награды и добор новых. */
+  function settleContracts() {
+    if (!S.lastResult) return;
+    const done = Contracts.onFinish(S, S.lastResult);
+    Contracts.claim(S, done);
+    S.lastResult.contracts = done.map(c => ({ text: Contracts.describe(c), reward: Contracts.rewardText(c) }));
+  }
+
+  /* Событие с выбором в комнате (п. 3.5). */
+  function resolveRoom(choice) {
+    const res = Battle.roomChoice(S, choice);
+    if (!res.ok) { render(); return; }
+    overlay = '';
+    if (res.events.length) Arena.emit(res.events, Balance.raid.fxSpan, false);
+    save(); refreshRaid();
   }
 
   function tick() {
     const res = Battle.tick(S, uiState());
     if (res.status === 'idle') return;
-    if (res.status === 'checkpoint') { Automation.ensure(S.raid); save(); render(); return; }
+    if (res.status === 'event') { overlay = 'event'; save(); render(); return; }
+    if (res.status === 'checkpoint') {
+      const story = Story.pending(S, S.raid.depth);
+      if (story) { S.raid.story = story; overlay = 'story'; }
+      else { Automation.ensure(S.raid); overlay = 'room'; }
+      save(); render(); return;
+    }
     if (res.status === 'advance') { Arena.reset(); save(); render(); return; }
     if (res.status === 'transition') { save(); refreshRaid(); return; }
     // Всё, кроме финала рейда, играется очередью (эффекты видны на арене);
     // defeat сразу уводит экран в итоги — там очередь всё равно сбрасывается.
-    if (res.events.length) Arena.emit(res.events, Balance.raid.fxSpan, res.status === 'defeat');
+    if (res.events.length) { res.events.forEach(e => Contracts.onEvent(S, e)); Arena.emit(res.events, Balance.raid.fxSpan, res.status === 'defeat'); }
     if (res.status === 'defeat') { Battle.finish(S, false); showResult(false); return; }
     if (res.status === 'cleared') { onCleared(); return; }
     save(); refreshRaid();
@@ -149,7 +173,10 @@
     screen = 'game'; tab = 'raid'; paused = false; dialog = null;
     S.settings = S.settings || { speed: Automation.validSpeed(S.raid.speed) };
     S.raid.speed = S.settings.speed;
-    overlay = S.raid.cleared && S.raid.depth % Balance.raid.checkpointEvery === 0 ? 'room' : '';
+    overlay = '';
+    if (S.raid.story) overlay = 'story';
+    else if (S.raid.roomEvent) overlay = 'event';
+    else if (S.raid.cleared && S.raid.depth % Balance.raid.checkpointEvery === 0) overlay = 'room';
     Automation.ensure(S.raid);
     Arena.reset();
     restartTimer(); render();
@@ -195,14 +222,18 @@
   function onCleared() {
     const r = S.raid;
     if (!r) return;
-    if (r.depth % Balance.raid.checkpointEvery === 0) { overlay = 'room'; Automation.ensure(r); save(); render(); }
+    if (r.depth % Balance.raid.checkpointEvery === 0) {
+      const story = Story.pending(S, r.depth); // веха глубины: сначала сюжетная вставка
+      if (story) { r.story = story; overlay = 'story'; save(); render(); return; }
+      overlay = 'room'; Automation.ensure(r); save(); render();
+    } else if (r.roomEvent) { overlay = 'event'; save(); render(); }
     else { save(); refreshRaid(); }
   }
 
   function useGrenade() {
     const res = Battle.grenade(S);
     if (!res.ok) return;
-    if (res.events.length) Arena.emit(res.events, Balance.raid.fxSpan, false);
+    if (res.events.length) { res.events.forEach(e => Contracts.onEvent(S, e)); Arena.emit(res.events, Balance.raid.fxSpan, false); }
     if (res.status === 'cleared') onCleared();
     else { save(); refreshRaid(); }
   }
@@ -311,6 +342,18 @@
       case 'repair': repair(btn && btn.dataset.item); break;
       case 'perk': pickPerk(btn && btn.dataset.index, btn && btn.dataset.perk); break;
       case 'grenade': useGrenade(); break;
+      case 'room-open': resolveRoom('open'); break;
+      case 'room-pass': resolveRoom('pass'); break;
+      case 'room-call': resolveRoom('call'); break;
+      case 'room-silent': resolveRoom('silent'); break;
+      case 'room-go': resolveRoom('go'); break;
+      case 'room-main': resolveRoom('main'); break;
+      case 'story-continue': {
+        if (S.raid && S.raid.story) { Story.mark(S, S.raid.story.id); S.raid.story = null; }
+        overlay = (S.raid && S.raid.cleared && S.raid.depth % Balance.raid.checkpointEvery === 0) ? 'room' : '';
+        if (overlay === 'room') Automation.ensure(S.raid);
+        save(); render(); break;
+      }
       case 'retreat':
         openDialog({ kind: 'confirm', eyebrow: 'ЭКСПЕДИЦИЯ', title: 'Отступить?', body: 'Отряд немедленно завершит рейд. Выжившие вернутся с ранениями, на базу уйдёт лишь половина собранного груза, аптечки не возвращаются. Глубина рейда засчитается.', confirm: 'Отступить', danger: true, command: 'retreat' });
         break;
@@ -382,5 +425,6 @@
   };
 
   if (initial) { State.recruit(S, false); State.recruit(S, false); save(); }
+  Contracts.ensure(S);
   render();requestAnimationFrame(animate);
 })();

@@ -3,7 +3,7 @@
    чтобы вернуться к тюнингу позже по запросу. Чистый модуль, без DOM. */
 window.Balance = (() => {
   const b = {
-    version: '0.5.0',
+    version: '0.6.0',
     profileVersion: 3,
     buildings: { cost: 85 },
     hiring: {
@@ -36,7 +36,11 @@ window.Balance = (() => {
       /* Пакет 0.5.0: решения в бою */
       grenadeDamage: 15,   // урок всем живым врагам (у осколочной гранаты своё значение)
       retreatCargo: 0.5,   // доля груза, уходящая на базу при отступлении
-      coverMinAlive: 2     // прикрытие отхода доступно при 2+ живых
+      coverMinAlive: 2,    // прикрытие отхода доступно при 2+ живых
+      /* Пакет 0.6.0: механики врагов и боссов */
+      nestType: 4, nestEvery: 3, nestMaxLarvae: 3,  // «Узел гнезда» спавнит Личинку каждые 3 хода (не более 3 живых)
+      spitterType: 2, spitterEvery: 3,              // «Плевальщик» каждый 3-й ход бьёт самого раненого, минуя «тяжёлого»
+      bossPhaseRatio: 0.5, bossLarvae: 2            // «Матка» на 50% HP призывает 2 Личинки
     },
     rewards: {
       bossFlat: 45, killFlat: 8, killPerDepth: 2,
@@ -89,8 +93,31 @@ window.Balance = (() => {
         scope_stabilizer: { name: 'Стабилизатор прицела', type: 'gadget', pierce: 1, durability: 10 },
         safety_beacon: { name: 'Страховой маяк', type: 'gadget', beacon: 1, durability: 1 }
       }
+    },
+    /* --- Пакет 0.6.0 «Контент» --- */
+    contracts: {
+      max: 3,                       // до трёх активных контрактов
+      creditMin: 50, creditMax: 150, // награда кредитами
+      itemChance: 0.35,             // шанс, что награда — предмет
+      kill: { min: 4, max: 10 },    // уничтожить N врагов типа T
+      depth: { min: 6, max: 20 },   // дойти до глубины N за один рейд
+      loot: { min: 40, max: 140 },  // собрать N кредитов за один рейд
+      evac: { min: 1, max: 3 }      // эвакуироваться N раз
+    },
+    modifiers: {
+      startDepth: 3, chance: 0.2,   // сектора с 3-го (не шлюз) с шансом 20% получают модификатор
+      list: {
+        radiation: { name: 'Радиация', text: 'В конце каждого хода живые бойцы теряют 2 HP (не ниже 1).', damage: 2 },
+        spores: { name: 'Споры', text: 'Всё лечение в секторе снижено на 50%.', healMul: 0.5 },
+        harsh: { name: 'Агрессивная среда', text: 'Враги наносят +15% урона, награды за бой +15%.', enemyMul: 1.15, rewardMul: 1.15 }
+      }
+    },
+    roomEvents: {
+      chance: 0.2,               // после зачистки обычного сектора (не шлюз)
+      containerEliteChance: 0.4, // «Запечатанный контейнер»: 40% — бой с элитой
+      containerBonus: 0.5        // при победе +50% к находке сектора
     }
-    /* Задел пакетов 0.6.0+: contracts: {...}, events: {...}, modifiers: {...} */
+    /* Задел пакетов 0.7.0+: sound: {...}, hints: {...} */
   };
   return b;
 })();

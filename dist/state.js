@@ -71,7 +71,8 @@ window.State = (() => {
     deepest: 0,
     run: 0,
     stats: stats(),
-    seenStory: []
+    seenStory: [],
+    contracts: []
   });
 
   function migrate(s) {
@@ -122,6 +123,7 @@ window.State = (() => {
       s.items = normalizeItems(s.items);
       s.stats = normalizeStats(s.stats);
       if (!Array.isArray(s.seenStory)) s.seenStory = [];
+      if (!Array.isArray(s.contracts)) s.contracts = [];
       if (s.raid) {
         s.raid.loot = int(s.raid.loot) || 0;
         if (!Number.isFinite(s.raid.lootCache)) s.raid.lootCache = 0;

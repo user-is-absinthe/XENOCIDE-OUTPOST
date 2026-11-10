@@ -38,7 +38,7 @@ const context = {
   addEventListener() {}, matchMedia: () => ({ matches: false })
 };
 context.window = context;
-for (const file of ['balance.js', 'progression.js', 'automation.js', 'interface.js', 'preparation.js', 'state.js', 'battle.js', 'screens.js', 'base-scene.js', 'arena.js', 'input.js'])
+for (const file of ['balance.js', 'progression.js', 'automation.js', 'interface.js', 'preparation.js', 'story.js', 'contracts.js', 'state.js', 'battle.js', 'screens.js', 'base-scene.js', 'arena.js', 'input.js'])
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), context);
 
 const smokeSource = fs.readFileSync('game.js', 'utf8').replace('render();requestAnimationFrame(animate);', `globalThis.smoke={
@@ -74,7 +74,7 @@ assert(menuHtml.includes('data-action="stats"'), 'кнопка «Статист�
 assert(menuHtml.includes('id="menu-demo"'), 'живая сцена в меню');
 assert(menuHtml.includes('menu-dim'), 'затемнение поверх сцены');
 assert(menuHtml.includes('pointer-events:none') === false, 'стили — в CSS, не инлайном');
-assert(menuHtml.includes('ВЕРСИЯ 0.5.0'), 'версия пакета в меню');
+assert(menuHtml.includes('ВЕРСИЯ 0.6.0'), 'версия пакета в меню');
 
 /* --- База, отряд, настройки, рейд --- */
 for (const tab of ['base', 'squad', 'save', 'raid']) {

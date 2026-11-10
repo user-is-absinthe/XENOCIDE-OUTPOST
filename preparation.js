@@ -19,14 +19,17 @@ window.Preparation = (() => {
     if(order==='weak')return alive.reduce((a,b)=>b.hp<a.hp?b:a);
     const danger=e=>(e.type===5?11:4+e.type)*(e.attackFactor||1);
     if(order==='threat')return alive.reduce((a,b)=>danger(b)>danger(a)?b:a);
-    return alive[0];
+    // Панцирник (type 3) в приоритете при сосредоточенном огне (п. 3.3)
+    return alive.find(e=>e.type===3)||alive[0];
   }
   function useKit(r){
     if(!(r.kits>0))return null;
     const candidates=r.crew.filter(c=>c.hp>0&&c.maxHp>0&&c.hp/c.maxHp<=.35);
     if(!candidates.length)return null;
     const unit=candidates.reduce((a,b)=>b.hp/b.maxHp<a.hp/a.maxHp?b:a);
-    const healed=Math.min((r.kitHeal||30)+(r.kitBonus||0),unit.maxHp-unit.hp);
+    const mods=Balance.modifiers&&Balance.modifiers.list;
+    const mul=(r.modifier==='spores'&&mods&&mods.spores)?mods.spores.healMul:1;
+    const healed=Math.min(Math.round(((r.kitHeal||30)+(r.kitBonus||0))*mul),unit.maxHp-unit.hp);
     r.kits--;unit.hp+=healed;
     return {name:unit.name,healed,unit};
   }
@@ -43,6 +46,12 @@ window.Preparation = (() => {
     r.findBonus=Number.isFinite(r.findBonus)&&r.findBonus>=0?r.findBonus:0;
     r.grenadeUsed=!!r.grenadeUsed;
     r.covered=!!r.covered;
+    /* Пакет 0.6.0: модификатор сектора, событие с выбором и задел тоннеля. */
+    const mods=Balance.modifiers&&Balance.modifiers.list;
+    r.modifier=(mods&&r.modifier&&mods[r.modifier])?r.modifier:null;
+    r.roomEvent=(r.roomEvent&&['container','radio','tunnel'].includes(r.roomEvent.kind))?{kind:r.roomEvent.kind}:null;
+    r.pendingFindBonus=r.pendingFindBonus===true;
+    r.skipNext=r.skipNext===true;
     if(!Number.isInteger(r.kits)||!Number.isInteger(r.kitsBought)||r.kits<0||r.kits>r.kitsBought||r.kitsBought>r.kitCapacity||r.kitsBought<0)throw Error('Некорректный запас аптечек');
   }
   return {price,limit,tiers,orders,normalize,cost,target,useKit,restoreRaid};

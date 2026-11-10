@@ -72,6 +72,43 @@ window.Screens = (() => {
     return `<div class="raid-actions"><button data-action="grenade" ${Battle.canGrenade(s) ? '' : 'disabled'} title="15 урона всем живым врагам, один раз за бой">Граната</button><button data-action="retreat" ${alive ? '' : 'disabled'}>Отступить</button>${Battle.canCover(s) ? '<button class="danger" data-action="cover" title="Самый раненый остаётся прикрывать отход">Прикрыть отход</button>' : ''}</div>`;
   }
 
+  /* Плашка модификатора сектора в HUD рейда (п. 3.4). */
+  function modifierHtml(r) {
+    const m = r && r.modifier && Balance.modifiers.list[r.modifier];
+    if (!m) return '';
+    return `<span class="modifier-badge" title="${h(m.text)}">МОДИФИКАТОР: ${h(m.name)}</span>`;
+  }
+
+  /* Панель контрактов на базе (п. 3.1). */
+  function contractsHtml(s) {
+    const list = Array.isArray(s.contracts) ? s.contracts : [];
+    const cards = list.map(c => `<article class="contract"><div class="row"><h4>${h(Contracts.describe(c))}</h4><span class="tag">${h(Contracts.rewardText(c))}</span></div><div class="contract-progress" role="img" aria-label="Прогресс ${Contracts.progressText(c)}"><span style="width:${Math.round(Contracts.ratio(c) * 100)}%"></span></div><span class="muted">${Contracts.progressText(c)}</span></article>`).join('');
+    return `<section class="panel contracts-panel"><div class="section-heading"><div><small>КОНТРАКТЫ КОРПУСА</small><h3>Задания внешней обороны</h3></div><span class="muted">До ${Balance.contracts.max} активных</span></div><div class="contracts">${cards || '<p class="muted">Контракты появятся после возвращения на базу.</p>'}</div><p class="muted">Прогресс обновляется по событиям боя и итогам рейда. Выполненные контракты заменяются новыми, награда уходит на базу.</p></section>`;
+  }
+
+  /* Диалог события с выбором в комнате (п. 3.5). */
+  function roomEventHtml(s, ui) {
+    const r = s.raid;
+    if (!r || !r.roomEvent) return '';
+    const kind = r.roomEvent.kind;
+    const specs = {
+      container: { title: 'ЗАПЕЧАТАННЫЙ КОНТЕЙНЕР', body: 'В переборке застрял армейский контейнер с целыми пломбами. За ним может ждать снаряжение — или то, что его охраняет.', options: [['open', 'Вскрыть контейнер'], ['pass', 'Пройти мимо']] },
+      radio: { title: 'РАДИОСТАНЦИЯ', body: 'Уцелевший ретранслятор ещё ловит позывные КОРПУСА ВНЕШНЕЙ ОБОРОНЫ. Можно запросить поддержку или не выдавать позицию.', options: [['call', 'Вызвать поддержку (+аптечка)'], ['silent', 'Сохранять молчание']] },
+      tunnel: { title: 'ОБХОДНОЙ ТОННЕЛЬ', body: 'В стене открыт технический тоннель: можно проскочить следующий сектор, но без добычи и без зачистки.', options: [['go', 'Пройти тоннелем (пропустить сектор)'], ['main', 'Держаться основного пути']] }
+    };
+    const spec = specs[kind];
+    if (!spec) return '';
+    const buttons = spec.options.map(([code, label]) => `<button data-action="room-${code}">${h(label)}</button>`).join('');
+    return `<div class="overlay dialog-overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>СЕКТОР ${r.depth} · РЕШЕНИЕ КОМАНДИРА</small><h2 id="dialog-title">${spec.title}</h2><p>${spec.body}</p><div class="actions">${buttons}</div></div></div>`;
+  }
+
+  /* Диалог сюжетной вставки по вехе глубины (п. 3.2). */
+  function storyHtml(s) {
+    const r = s.raid, entry = r && r.story;
+    if (!entry) return '';
+    return `<div class="overlay dialog-overlay"><div class="dialog story-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>ЗАПИСЬ ПОСТА «КОВЧЕГ»</small><h2 id="dialog-title">${h(entry.title)}</h2><p>${h(entry.text)}</p><div class="actions"><button class="primary" data-action="story-continue">Продолжить →</button></div></div></div>`;
+  }
+
   function menu(s, ui) {
     return `<div class="menu-stage"><canvas id="menu-demo" width="800" height="350" aria-hidden="true"></canvas><div class="menu-dim" aria-hidden="true"></div>
  <div class="title-screen"><div class="title-mark">XENOCIDE<br><strong>OUTPOST</strong></div><p>ПОСТ «КОВЧЕГ» · ВНЕШНИЙ ПЕРИМЕТР</p>
@@ -82,7 +119,7 @@ window.Screens = (() => {
 
   function base(s, ui) {
     const cost = Balance.buildings.cost;
-    return `<div class="page-heading"><div><small>ОПЕРАЦИОННЫЙ ЦЕНТР</small><h2>Пост «Ковчег»</h2></div><button class="primary" data-${s.raid ? 'action="resume"' : 'tab="squad"'}>${s.raid ? 'Вернуться к экспедиции' : 'Подготовить отряд →'}</button></div>` + BaseScene.html(s.buildings) + `<div class="base-metrics"><div><span>Бойцов на базе</span><strong>${s.recruits.length}</strong></div><div><span>Максимальная глубина</span><strong>${s.deepest}</strong></div><div><span>Завершено рейдов</span><strong>${s.run}</strong></div></div><section class="panel"><div class="section-heading"><div><small>РАЗВИТИЕ БАЗЫ</small><h3>Здания и улучшения</h3><button class="bulk-upgrade" data-action="buy-all" ${Object.keys(buildingNames).some(key => s.res.credits >= cost * s.buildings[key]) ? '' : 'disabled'}>Купить на всё</button></div><span class="muted">Общая покупка сначала улучшает здания с самым низким уровнем.</span></div><div class="buildings">${Object.entries(buildingNames).map(([key, name]) => { const level = s.buildings[key], price = cost * level; return `<article class="building" id="building-${key}" tabindex="-1"><div class="row"><h3>${name}</h3><span class="tag">Ур. ${level} → ${level + 1}</span></div><p class="upgrade-current"><b>Сейчас</b><br>${Progression.describe(key, level)}</p><div class="upgrade-benefit"><b>Следующий уровень</b><br>${Progression.describe(key, level + 1)}</div><button class="wide" data-up="${key}" ${s.res.credits < price ? 'disabled' : ''}>Улучшить · ₡ ${cash(price)}</button><button class="wide bulk-upgrade" data-action="buy-max-${key}" ${s.res.credits < price ? 'disabled' : ''}>Прокачать на всю сумму</button><span class="cost-hint">${s.res.credits < price ? 'Не хватает ₡ ' + cash(price - s.res.credits) : 'Кредитов достаточно'}</span></article>`; }).join('')}</div></section>`;
+    return `<div class="page-heading"><div><small>ОПЕРАЦИОННЫЙ ЦЕНТР</small><h2>Пост «Ковчег»</h2></div><button class="primary" data-${s.raid ? 'action="resume"' : 'tab="squad"'}>${s.raid ? 'Вернуться к экспедиции' : 'Подготовить отряд →'}</button></div>` + BaseScene.html(s.buildings) + `<div class="base-metrics"><div><span>Бойцов на базе</span><strong>${s.recruits.length}</strong></div><div><span>Максимальная глубина</span><strong>${s.deepest}</strong></div><div><span>Завершено рейдов</span><strong>${s.run}</strong></div></div>${contractsHtml(s)}<section class="panel"><div class="section-heading"><div><small>РАЗВИТИЕ БАЗЫ</small><h3>Здания и улучшения</h3><button class="bulk-upgrade" data-action="buy-all" ${Object.keys(buildingNames).some(key => s.res.credits >= cost * s.buildings[key]) ? '' : 'disabled'}>Купить на всё</button></div><span class="muted">Общая покупка сначала улучшает здания с самым низким уровнем.</span></div><div class="buildings">${Object.entries(buildingNames).map(([key, name]) => { const level = s.buildings[key], price = cost * level; return `<article class="building" id="building-${key}" tabindex="-1"><div class="row"><h3>${name}</h3><span class="tag">Ур. ${level} → ${level + 1}</span></div><p class="upgrade-current"><b>Сейчас</b><br>${Progression.describe(key, level)}</p><div class="upgrade-benefit"><b>Следующий уровень</b><br>${Progression.describe(key, level + 1)}</div><button class="wide" data-up="${key}" ${s.res.credits < price ? 'disabled' : ''}>Улучшить · ₡ ${cash(price)}</button><button class="wide bulk-upgrade" data-action="buy-max-${key}" ${s.res.credits < price ? 'disabled' : ''}>Прокачать на всю сумму</button><span class="cost-hint">${s.res.credits < price ? 'Не хватает ₡ ' + cash(price - s.res.credits) : 'Кредитов достаточно'}</span></article>`; }).join('')}</div></section>`;
   }
 
   function squad(s, ui) {
@@ -125,12 +162,12 @@ window.Screens = (() => {
  <div id="raid-event-wrap">${eventHtml(s)}</div>
  <div class="actions"><button data-action="pause" aria-pressed="${ui.paused}">${ui.paused ? 'Продолжить' : 'Пауза'}</button><button data-action="speed">Скорость ×${r.speed}</button></div><h3 class="log-title">Последние события</h3><div class="log" id="raid-log">${logHtml(s)}</div></div>
  <div class="panel"><small>БИОМЕТРИЯ И ГРУЗ</small><h3>${Battle.routeInfo(r).name}</h3><p class="muted">Маршрут действует до следующего шлюза. Элитные враги: +50% HP, +20% урона, двойная награда.</p><h3>Приказы и запас</h3><p>${Preparation.orders[Preparation.normalize({ order: r.order }).order].name}</p><p id="raid-kits">${kitsHtml(r)}</p><h3>Данные отряда</h3><div id="raid-crew">${r.crew.map(c => GameUI.healthRow(c.name, c.hp, c.maxHp || c.hp)).join('')}</div><h3>Противники</h3><div id="raid-foes">${(r.foes || []).filter(e => e.hp > 0).map(e => GameUI.healthRow(Battle.foeName(e), e.hp, e.maxHp, true)).join('') || '<p>Контакт отсутствует.</p>'}</div><p id="raid-loot">Добыча: ${cash(r.loot)} кредитов</p><p class="muted">После зачистки: ${Math.round(Progression.command(s.buildings.command).cache * 100)}% — тайник, ${Math.round(Balance.loot.medicalChance * 100)}% — медприпасы. Находки забираются автоматически. При поражении сохраняется ${Math.round(Progression.command(s.buildings.command).recovery * 100)}% груза.</p></div></div>
- ${checkpoint ? `<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>СЕКТОР ${r.depth} · БОСС УНИЧТОЖЕН</small><h2 id="dialog-title">ЭВАКУАЦИОННЫЙ ШЛЮЗ</h2><p>Груз: ₡ ${cash(r.loot)}. Живы ${r.crew.filter(c => c.hp > 0).length} бойцов.</p><p>Выбор на следующие пять секторов:</p><p><b>Сервисный обход:</b> −15% HP и урона врагов, −15% наград за бой. Шанс элиты — 6%.</p><p class="warn"><b>Заражённое хранилище:</b> +20% HP и урона врагов, +50% наград за бой. Шанс элиты — 24%.</p><p>Медпост помог выжившим. Уже собранный груз не меняется.</p>${r.sectorEvent ? `<p>${h(r.sectorEvent.title)}: ${h(GameUI.logLine(r.sectorEvent.text))}</p>` : ''}${automation(s, ui)}<div class="actions"><button class="primary" data-action="extract">Эвакуироваться с грузом</button><button data-action="route-safe">Сервисный обход → ${r.depth + 5}</button><button data-action="route-risk">Заражённое хранилище → ${r.depth + 5}</button></div></div></div>` : ''}`;
+ ${checkpoint && ui.overlay !== 'story' && ui.overlay !== 'event' ? `<div class="overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>СЕКТОР ${r.depth} · БОСС УНИЧТОЖЕН</small><h2 id="dialog-title">ЭВАКУАЦИОННЫЙ ШЛЮЗ</h2><p>Груз: ₡ ${cash(r.loot)}. Живы ${r.crew.filter(c => c.hp > 0).length} бойцов.</p><p>Выбор на следующие пять секторов:</p><p><b>Сервисный обход:</b> −15% HP и урона врагов, −15% наград за бой. Шанс элиты — 6%.</p><p class="warn"><b>Заражённое хранилище:</b> +20% HP и урона врагов, +50% наград за бой. Шанс элиты — 24%.</p><p>Медпост помог выжившим. Уже собранный груз не меняется.</p>${r.sectorEvent ? `<p>${h(r.sectorEvent.title)}: ${h(GameUI.logLine(r.sectorEvent.text))}</p>` : ''}${automation(s, ui)}<div class="actions"><button class="primary" data-action="extract">Эвакуироваться с грузом</button><button data-action="route-safe">Сервисный обход → ${r.depth + 5}</button><button data-action="route-risk">Заражённое хранилище → ${r.depth + 5}</button></div></div></div>` : ''}${roomEventHtml(s, ui)}${storyHtml(s)}`;
   }
 
   function hudHtml(s, ui) {
     const r = s.raid;
-    return `<span>${'СЕКТОР ' + r.depth + ' · ' + (ui.paused ? 'ПАУЗА' : r.cleared ? 'ЗАЧИЩЕН' : 'КОНТАКТ')}</span><span>ОТРЯД ${r.crew.filter(c => c.hp > 0).length}/${r.crew.length} · ГРУЗ ₡ ${cash(r.loot)}</span>`;
+    return `<span>${'СЕКТОР ' + r.depth + ' · ' + (ui.paused ? 'ПАУЗА' : r.cleared ? 'ЗАЧИЩЕН' : 'КОНТАКТ')}</span><span>ОТРЯД ${r.crew.filter(c => c.hp > 0).length}/${r.crew.length} · ГРУЗ ₡ ${cash(r.loot)}</span>${modifierHtml(r)}`;
   }
   function routeTrackHtml(r) {
     return Array.from({ length: 5 }, (_, i) => { const n = Math.floor((r.depth - 1) / 5) * 5 + i + 1; return `<span class="${n < r.depth || n === r.depth && r.cleared ? 'done' : n === r.depth ? 'current' : ''}">${n}${n % 5 === 0 ? ' ⚑' : ''}</span>`; }).join('');
@@ -180,6 +217,12 @@ window.Screens = (() => {
     return `<div class="page-heading"><div><small>ПРОГРЕСС И ПЕРЕНОС</small><h2>Сохранения и настройки</h2></div></div><section class="panel speed-settings"><div><h3>Скорость игры</h3><p class="muted">Сохраняется между рейдами и после перезапуска. Автовыбор маршрута: ×1 — 15 секунд, ×2 и ×4 — 5 секунд.</p></div><button data-action="speed">Скорость ×${Automation.validSpeed(s.settings?.speed)}</button></section><div class="grid"><section class="panel"><h3>Перенести игру на другой компьютер</h3><p>Экспортируйте JSON и сохраните его отдельно от папки игры. Файл включает текущую экспедицию.</p><div class="actions"><button class="primary" data-action="export">Экспортировать сохранение</button><button data-action="import">Загрузить JSON</button><input id="import" type="file" accept="application/json,.json" hidden></div><p class="muted">Загрузка файла заменит текущий прогресс. Сначала экспортируйте его, если хотите сохранить.</p></section><section class="panel danger-panel"><h3>Начать заново</h3><p>Удаляет прогресс базы и текущий рейд. Потребуется подтверждение.</p><button class="danger" data-action="new">Новая игра</button>${s.raid ? `<button class="danger wide" data-action="newrun">Прервать экспедицию</button>` : ''}</section></div><p class="muted">Прогресс сохраняется автоматически в этом браузере. При переносе папки используйте экспорт JSON.</p>`;
   }
 
+  function contractsBlock(res) {
+    const list = res && res.contracts;
+    if (!Array.isArray(list) || !list.length) return '';
+    return `<div class="result-contracts"><h3>Выполненные контракты</h3>${list.map(c => `<div class="change-row"><span>${h(c.text)}</span><strong>${h(c.reward)}</strong></div>`).join('')}</div>`;
+  }
+
   function result(s, ui) {
     const res = s.lastResult;
     const win = res ? res.ok : ui.overlay === 'win';
@@ -213,7 +256,7 @@ window.Screens = (() => {
       const perks = pendingIdx >= 0 ? perkPicker(s.recruits[pendingIdx], pendingIdx) : '';
       body = `<div class="result-changes"><h3>Изменения в отряде</h3>${changes}</div>
  <div class="result-rewards"><div><span>За бои</span><strong>₡ ${cash(loot.battle, true)}</strong></div><div><span>Тайники</span><strong>₡ ${cash(loot.cache, true)}</strong></div>${res.ok ? `<div><span>Бонус эвакуации</span><strong>₡ ${cash(loot.extract, true)}</strong></div>` : ''}<div><span>Возврат припасов</span><strong>₡ ${cash(loot.refund, true)}</strong></div><div class="total"><span>Итого на базу</span><strong>₡ ${cash((s.lastLoot || 0) + (s.lastRefund || 0), true)}</strong></div></div>
- ${losses.length ? `<div class="result-losses"><h3>Потери и восстановление</h3>${losses.join('')}${res.losses.dead.length ? `<p class="muted">Не вернулись: ${res.losses.dead.map(h).join(', ')}.</p>` : ''}</div>` : ''}${perks}`;
+ ${losses.length ? `<div class="result-losses"><h3>Потери и восстановление</h3>${losses.join('')}${res.losses.dead.length ? `<p class="muted">Не вернулись: ${res.losses.dead.map(h).join(', ')}.</p>` : ''}</div>` : ''}${perks}${contractsBlock(res)}`;
     }
     return `<div class="overlay result-screen"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>ОТЧЁТ · ОПЕРАЦИЯ ${s.run}</small><h2 id="dialog-title">${title}</h2><p>${intro}</p>${body}<button class="primary wide" data-action="dismiss">Вернуться на базу →</button></div></div>`;
   }
@@ -283,6 +326,7 @@ window.Screens = (() => {
 
   return {
     h, cash, classes, classHelp, buildingNames, hpTier, SLOT_NAMES, itemLabel, xpTrack, gearBlock, perkPicker, raidActionsHtml,
+    modifierHtml, contractsHtml, roomEventHtml, storyHtml, contractsBlock,
     menu, base, squad, raid, save, result, stats, dialog,
     hudHtml, routeTrackHtml, statusHtml, eventHtml, logHtml, kitsHtml,
     preparation, autoMessage, automation, drawStats, drawBars
